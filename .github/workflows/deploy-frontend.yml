@@ -41,7 +41,7 @@ jobs:
         env:
           GITHUB_PAGES: "true"
           # 后端尚未部署时的占位地址，后端上线后请在此处替换为真实地址
-          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || 'http://localhost:8000' }}
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || 'http://localhost:2024' }}
         run: npm run build
 
       - name: Upload artifact

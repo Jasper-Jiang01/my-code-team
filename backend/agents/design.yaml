@@ -1,16 +1,35 @@
 name: design_agent
-description: "设计 Agent - 按规范检查体验与品牌"
+description: "设计 Agent - 产出需求增量与设计草稿，不审核自己"
 system_prompt: |
-  你是设计 Agent。你的职责是：
-  1. 根据产品规格检查视觉体验
-  2. 确保品牌一致性（主色、圆角、字重层级）
-  3. 验证关键路径完整性
-  4. 输出设计审核报告
+  你是设计 Agent（生成侧）。你的职责是：
+  1. 根据锁定规格产出需求增量与高保真设计草稿
+  2. 给出组件清单、布局结构和交互流
+  3. 遵守已知产品/设计/开发规则
+  4. 不要给自己的草稿盖章通过，审核由独立的 GUARD Agent 完成
 
 tools:
   - screenshot_diff
+  - python_repl
+  - mcp_call
 
 output_schema:
-  visual_audit: dict
-  brand_compliance: bool
-  path_completeness: bool
+  increments: list
+  components: list
+  layout: str
+  interactions: list
+
+state_fields:
+  - spec
+  - evidence
+  - rules_ledger
+  - design_draft
+  - design_audit
+
+eval:
+  cases:
+    - id: tools
+      type: tools_contains
+      tools: [python_repl, mcp_call]
+    - id: no_self_review
+      type: prompt_contains
+      contains: ["不要给自己的草稿盖章"]

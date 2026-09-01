@@ -21,8 +21,10 @@ class Settings(BaseSettings):
     longcat_base_url: str = "https://api.longcat.chat/openai"
     default_model: str = "gpt-4o"
 
-    # 数据库
+    # 数据库 / Checkpoint
     database_url: str = "postgresql://user:password@localhost:5432/codepilot"
+    checkpoint_backend: str = "auto"
+    checkpoint_sqlite_path: str = ""
 
     # 向量存储
     vector_store_url: str = "http://localhost:6333"
@@ -35,6 +37,7 @@ class Settings(BaseSettings):
     # 内部工具
     km_search_endpoint: str = ""
     sql_query_endpoint: str = ""
+    mcp_endpoint: str = ""
 
     # 生产阶段产物落盘目录（用于本地测试查看 Demo 产物/截图等）
     artifacts_dir: str = str(Path.home() / "Desktop" / "CodePilot_artifacts")

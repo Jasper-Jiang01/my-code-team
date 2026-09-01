@@ -10,18 +10,20 @@
 ``demo_artifact``。
 
 读写：``demo_artifact``（由本子图拥有）。
-使用的工具：``deploy_demo``、``screenshot_diff``（通过 ``design`` Agent Harness）。
+使用的工具：``deploy_demo``、``screenshot_diff``、``python_repl``、``mcp_call``。
 """
 
+import html
 import json
 import logging
 from pathlib import Path
 
 from codepilot.core.agent_loader import invoke_agent
 from codepilot.core.config import settings
+from codepilot.core.context_views import format_state_context
 from codepilot.core.llm_utils import extract_json, safe_content
 from codepilot.states.workflow_state import Demo, WorkflowState
-from codepilot.tools import deploy_demo, screenshot_diff
+from codepilot.tools import browser_screenshot, deploy_demo, mcp_call, python_repl, screenshot_diff
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +43,8 @@ def _artifact_dir(goal: str) -> Path:
 
 
 _DESIGN_TASK_TEMPLATE = """\
-锁定规格（spec）：{spec}
-证据（evidence）：{evidence}
-已知规则（rules_ledger）：{rules}
+你被授权读取的 State Bus 字段：
+{context}
 
 {extra_instructions}
 
@@ -60,6 +61,23 @@ def _parse_json(raw: str, default: dict | None = None) -> dict:
     return dict(default or {})
 
 
+def _export_design_html(artifact_dir: Path, goal: str, draft: dict) -> Path:
+    """把设计草稿导出为可截图的 design.html。"""
+    title = html.escape((goal or "Design")[:80])
+    layout = html.escape(str(draft.get("layout") or ""))
+    items = "".join(f"<li>{html.escape(str(item))}</li>" for item in (draft.get("components") or [])[:20])
+    markup = (
+        "<!doctype html><html><head><meta charset='utf-8'><title>"
+        f"{title}</title>"
+        "<style>body{font-family:sans-serif;background:#eef3ff;margin:24px}</style>"
+        f"</head><body><h1>{title}</h1><p>{layout}</p><ul>{items}</ul></body></html>"
+    )
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    path = artifact_dir / "design.html"
+    path.write_text(markup, encoding="utf-8")
+    return path
+
+
 # -- 01 EXPLORE: 需求增量 --------------------------------------------------
 
 
@@ -72,11 +90,8 @@ def explore(state: WorkflowState) -> dict:
     Returns:
         包含增量需求结论和 step=1 checkpoint 的字典。
     """
-    spec = state.get("spec") or {}
     extra = _DESIGN_TASK_TEMPLATE.format(
-        spec=json.dumps(spec, ensure_ascii=False),
-        evidence=json.dumps(state.get("evidence") or {}, ensure_ascii=False),
-        rules=json.dumps(state.get("rules_ledger") or [], ensure_ascii=False),
+        context=format_state_context(state, "design"),
         extra_instructions="请分析需求增量，明确新增功能与边界约束，为设计草稿做准备。",
         json_schema='{"increments": ["增量1", "增量2"], "constraints": ["约束1"]}',
     )
@@ -94,21 +109,17 @@ def explore(state: WorkflowState) -> dict:
 
 
 def generate(state: WorkflowState) -> dict:
-    """02 GENERATE — 产出设计草稿。
-
-    Args:
-        state: 当前的工作流状态。
-
-    Returns:
-        包含更新后 design_draft 和 step=2 checkpoint 的字典。
-    """
+    """02 GENERATE — 产出设计草稿。"""
     draft = state.get("design_draft") or {}
+    audit = state.get("design_audit") or {}
+    audit_note = ""
+    if audit.get("issues"):
+        audit_note = f"上一轮 GUARD 未通过，必须逐条修订：{json.dumps(audit.get('issues'), ensure_ascii=False)}"
     extra = _DESIGN_TASK_TEMPLATE.format(
-        spec=json.dumps(state.get("spec") or {}, ensure_ascii=False),
-        evidence=json.dumps(state.get("evidence") or {}, ensure_ascii=False),
-        rules=json.dumps(state.get("rules_ledger") or [], ensure_ascii=False),
+        context=format_state_context(state, "design"),
         extra_instructions=(
             "基于需求增量，产出高保真设计草稿（组件清单、布局结构、交互流）。"
+            + ((" " + audit_note) if audit_note else "")
         ),
         json_schema='{"components": ["组件1"], "layout": "...", "interactions": ["流1"]}',
     )
@@ -120,6 +131,7 @@ def generate(state: WorkflowState) -> dict:
     except Exception:  # noqa: BLE001
         logger.exception("generate: failed via LLM")
 
+    _export_design_html(_artifact_dir(state.get("goal", "demo")), state.get("goal", "demo"), draft)
     return {"production_step": 2, "design_draft": draft, "checkpoints": ["GENERATE_DONE"]}
 
 
@@ -127,51 +139,75 @@ def generate(state: WorkflowState) -> dict:
 
 
 def guard(state: WorkflowState) -> dict:
-    """03 GUARD — 设计规范审核（DP 审核）。
-
-    Args:
-        state: 当前的工作流状态。
-
-    Returns:
-        包含 design_audit 和 step=3 checkpoint 的字典。
-    """
+    """03 GUARD — 由独立审核 Agent 做设计规范审核，失败默认不放行。"""
     extra = _DESIGN_TASK_TEMPLATE.format(
-        spec=json.dumps(state.get("spec") or {}, ensure_ascii=False),
-        evidence=json.dumps(state.get("evidence") or {}, ensure_ascii=False),
-        rules=json.dumps(state.get("rules_ledger") or [], ensure_ascii=False),
-        extra_instructions="审核设计草稿是否符合品牌规范、关键路径完整性与一致性。",
+        context=format_state_context(state, "guard"),
+        extra_instructions=(
+            "审核以下设计草稿，不得因为由同事生成就放行。"
+            f"设计草稿：{json.dumps(state.get('design_draft') or {}, ensure_ascii=False)}"
+        ),
         json_schema='{"approved": bool, "issues": ["问题1"]}',
     )
-    audit: dict = {"approved": True, "issues": []}
+    audit: dict = {"approved": False, "issues": ["GUARD 未产出有效审核结果"]}
     try:
-        response = invoke_agent("design", extra)
+        response = invoke_agent("guard", extra)
         parsed = _parse_json(safe_content(response))
-        if parsed:
-            audit = parsed
+        if parsed and "approved" in parsed:
+            audit = {
+                "approved": bool(parsed.get("approved")),
+                "issues": list(parsed.get("issues") or []),
+            }
     except Exception:  # noqa: BLE001
         logger.exception("guard: failed via LLM")
 
-    return {"production_step": 3, "design_audit": audit, "checkpoints": ["GUARD_DONE"]}
+    round_count = int(state.get("production_guard_round") or 0) + 1
+    checkpoint = "GUARD_PASS" if audit.get("approved") else "GUARD_REJECT"
+    return {
+        "production_step": 3,
+        "design_audit": audit,
+        "production_guard_round": round_count,
+        "checkpoints": [checkpoint],
+    }
 
 
 # -- 04 BUILD: 开发实现 ----------------------------------------------------
 
 
 def build(state: WorkflowState) -> dict:
-    """04 BUILD — 开发实现并部署 Demo 产物。
-
-    使用 ``deploy_demo`` 工具将实现产物写入本地磁盘（``settings.artifacts_dir``
-    下），产出的构建信息写入 ``build_artifact``。
-
-    Args:
-        state: 当前的工作流状态。
-
-    Returns:
-        包含 build_artifact 和 step=4 checkpoint 的字典。
-    """
+    """04 BUILD — 用 MCP 发现工具 + PythonREPL 生成页面，再打包 Demo。"""
     draft = state.get("design_draft") or {}
     goal = state.get("goal", "demo")
-    artifact_path = str(_artifact_dir(goal) / "build.zip")
+    artifact_dir = _artifact_dir(goal)
+    artifact_path = str(artifact_dir / "build.zip")
+    components = list(draft.get("components") or [])
+    title = (goal or "Demo")[:80]
+
+    mcp_catalog: dict = {}
+    try:
+        mcp_catalog = mcp_call.invoke({"method": "tools/list"})
+    except Exception:  # noqa: BLE001
+        logger.exception("build: mcp_call tools/list failed")
+
+    html = (
+        "<!doctype html><html><head><meta charset='utf-8'><title>"
+        f"{title}</title></head><body><h1>{title}</h1><ul>"
+        + "".join(f"<li>{item}</li>" for item in components[:20])
+        + "</ul></body></html>"
+    )
+    repl_code = (
+        "html = " + json.dumps(html, ensure_ascii=False) + "\n"
+        "f = open('index.html', 'w')\n"
+        "f.write(html)\n"
+        "f.close()\n"
+        "result = 'index.html'\n"
+    )
+    repl_result: dict = {}
+    try:
+        repl_result = python_repl.invoke({"code": repl_code, "workdir": str(artifact_dir)})
+    except Exception:  # noqa: BLE001
+        logger.exception("build: python_repl failed")
+        repl_result = {"ok": False}
+
     deploy_result: dict = {}
     try:
         deploy_result = deploy_demo.invoke(
@@ -183,6 +219,8 @@ def build(state: WorkflowState) -> dict:
                     "spec": state.get("spec"),
                     "design_draft": draft,
                     "design_audit": state.get("design_audit"),
+                    "mcp": mcp_catalog,
+                    "repl": repl_result,
                 },
             }
         )
@@ -193,7 +231,9 @@ def build(state: WorkflowState) -> dict:
         "artifact_path": artifact_path,
         "deploy_status": deploy_result.get("status", "unknown"),
         "url": deploy_result.get("url", ""),
-        "components": list(draft.get("components", [])),
+        "components": components,
+        "repl_ok": bool(repl_result.get("ok")),
+        "mcp_tools": [item.get("name") for item in (mcp_catalog.get("tools") or []) if isinstance(item, dict)],
     }
     return {"production_step": 4, "build_artifact": build_artifact, "checkpoints": ["BUILD_DONE"]}
 
@@ -201,73 +241,59 @@ def build(state: WorkflowState) -> dict:
 # -- 05 COMPARE: 视觉还原 --------------------------------------------------
 
 
-def _render_placeholder_screenshot(path: Path, title: str, lines: list[str], bg_color: str) -> None:
-    """在本地生成一张简单的占位截图（用于本地测试演示视觉对比流程）。
-
-    真实场景下 design.png（设计稿）应来自设计工具导出，screenshot.png
-    （实际截图）应来自浏览器/App 自动化截图；本地测试阶段暂用 Pillow
-    绘制包含设计草稿要点的示意图代替。
-
-    Args:
-        path: 输出图片路径。
-        title: 图片标题（通常为 goal）。
-        lines: 需要绘制的正文行（如组件清单）。
-        bg_color: 背景色（十六进制），用于制造设计稿与截图之间的可辨识差异。
-    """
-    from PIL import Image, ImageDraw
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    img = Image.new("RGB", (800, 600), color=bg_color)
-    draw = ImageDraw.Draw(img)
-    draw.text((20, 20), title[:60], fill="black")
-    y = 60
-    for line in lines[:15]:
-        draw.text((20, y), f"- {line}"[:90], fill="black")
-        y += 30
-    img.save(path)
-
-
 def compare(state: WorkflowState) -> dict:
-    """05 COMPARE — 视觉还原比对。
+    """05 COMPARE — 截取设计稿 HTML 与 BUILD 产物页面，再做像素对比。
 
-    本地测试场景下，先用 Pillow 分别渲染出「设计稿」与「实际截图」两张
-    占位图（内容取自 design_draft，背景色故意不同以制造可感知的差异），
-    再调用 ``screenshot_diff`` 做真实的像素级对比。
-
-    Args:
-        state: 当前的工作流状态。
-
-    Returns:
-        包含 visual_compare 和 step=5 checkpoint 的字典。
+    优先用 Playwright 真浏览器；没有浏览器时按 HTML DOM 光栅化（仍来自真实文件，
+    不是固定占位图）。
     """
     draft = state.get("design_draft") or {}
-    build_artifact = state.get("build_artifact") or {}
     goal = state.get("goal", "demo")
     artifact_dir = _artifact_dir(goal)
+    design_html = artifact_dir / "design.html"
+    page_html = artifact_dir / "index.html"
     reference_path = artifact_dir / "design.png"
     actual_path = artifact_dir / "screenshot.png"
 
-    compare_result: dict = {}
+    if not design_html.exists():
+        _export_design_html(artifact_dir, goal, draft)
+
+    compare_result: dict = {
+        "pass": False,
+        "similarity": 0.0,
+        "diff_image_path": None,
+        "mode": "placeholder",
+        "unverified": True,
+    }
     try:
-        components = list(draft.get("components") or [])
-        _render_placeholder_screenshot(
-            reference_path, f"[设计稿] {goal}", components, bg_color="#eef3ff"
+        if not page_html.exists():
+            raise FileNotFoundError(f"BUILD page missing: {page_html}")
+        design_shot = browser_screenshot.invoke(
+            {"html_path": str(design_html), "output_path": str(reference_path)}
         )
-        _render_placeholder_screenshot(
-            actual_path, f"[实际截图] {goal}", components, bg_color="#ffffff"
+        page_shot = browser_screenshot.invoke(
+            {"html_path": str(page_html), "output_path": str(actual_path)}
         )
-        compare_result = screenshot_diff.invoke(
+        diff_result = screenshot_diff.invoke(
             {
                 "reference_path": str(reference_path),
                 "actual_path": str(actual_path),
                 "threshold": 0.95,
             }
         )
+        mode = page_shot.get("mode") or design_shot.get("mode") or "html_raster"
+        compare_result = {
+            **diff_result,
+            "mode": mode,
+            "unverified": False,
+            "design_html": str(design_html),
+            "page_html": str(page_html),
+        }
     except Exception:  # noqa: BLE001
-        logger.exception("compare: screenshot_diff failed")
-        compare_result = {"pass": False, "similarity": 0.0, "diff_image_path": None}
+        logger.exception("compare: screenshot or diff failed")
 
-    return {"production_step": 5, "visual_compare": compare_result, "checkpoints": ["COMPARE_DONE"]}
+    checkpoint = "COMPARE_DONE" if not compare_result.get("unverified") else "COMPARE_UNVERIFIED"
+    return {"production_step": 5, "visual_compare": compare_result, "checkpoints": [checkpoint]}
 
 
 # -- 06 VERIFY: QA 验收 ----------------------------------------------------
@@ -286,14 +312,18 @@ def verify(state: WorkflowState) -> dict:
     """
     build_artifact = state.get("build_artifact") or {}
     visual_compare = state.get("visual_compare") or {}
-    visual_pass = bool(visual_compare.get("pass", False))
+    visual_pass = bool(visual_compare.get("pass", False)) and not visual_compare.get("unverified")
+    audit = state.get("design_audit") or {}
 
     demo: Demo = {
         "artifact_path": build_artifact.get("artifact_path", ""),
         "version": f"v1.0-step{state.get('production_step', 6)}",
     }
+    checkpoint = "VISUAL_PASS" if visual_pass else "VISUAL_UNVERIFIED"
+    if not audit.get("approved"):
+        checkpoint = "GUARD_FORCED_BUILD"
     return {
         "production_step": 6,
         "demo_artifact": demo,
-        "checkpoints": ["VISUAL_PASS" if visual_pass else "VISUAL_FAIL", "PRODUCE_DONE"],
+        "checkpoints": [checkpoint, "PRODUCE_DONE"],
     }

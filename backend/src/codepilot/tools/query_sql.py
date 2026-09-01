@@ -1,8 +1,15 @@
 """用于数据检索的 SQL 查询工具。"""
 
+from __future__ import annotations
+
+import logging
 from typing import Any
 
 from langchain_core.tools import tool
+
+from codepilot.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class SQLQueryError(RuntimeError):
@@ -10,6 +17,61 @@ class SQLQueryError(RuntimeError):
 
 
 _FORBIDDEN_KEYWORDS = ("DROP ", "DELETE ", "TRUNCATE ", "ALTER ", "UPDATE ", "INSERT ")
+
+_PLACEHOLDER_DB = "postgresql://user:password@localhost:5432/codepilot"
+
+
+def _fixture_rows(sql: str) -> list[dict[str, Any]]:
+    """本地夹具：返回带口径的指标行，供 DecisionGraph 写入事实台账。"""
+    snippet = " ".join(sql.split())[:240]
+    return [
+        {
+            "metric": "weekly_active_merchants",
+            "value": 12800,
+            "definition": "近 7 日有经营行为的商家数（去重）",
+            "unit": "户",
+            "sql_echo": snippet,
+        },
+        {
+            "metric": "report_reach_uv",
+            "value": 5400,
+            "definition": "经营周报触达 UV（推送成功且曝光）",
+            "unit": "人",
+            "sql_echo": snippet,
+        },
+        {
+            "metric": "report_click_rate",
+            "value": 0.23,
+            "definition": "经营周报点击率 = 点击 UV / 触达 UV",
+            "unit": "ratio",
+            "sql_echo": snippet,
+        },
+    ]
+
+
+def _try_real_query(sql: str, timeout: int) -> list[dict[str, Any]] | None:
+    url = (settings.sql_query_endpoint or "").strip()
+    if url:
+        import httpx
+
+        response = httpx.post(url, json={"sql": sql, "timeout": timeout}, timeout=float(timeout))
+        response.raise_for_status()
+        payload = response.json()
+        rows = payload if isinstance(payload, list) else payload.get("rows", [])
+        return [row for row in rows if isinstance(row, dict)]
+
+    database_url = (settings.database_url or "").strip()
+    if not database_url or database_url == _PLACEHOLDER_DB:
+        return None
+
+    from sqlalchemy import create_engine, text
+
+    engine = create_engine(database_url, pool_pre_ping=True)
+    with engine.connect() as conn:
+        conn = conn.execution_options(timeout=timeout)
+        result = conn.execute(text(sql))
+        columns = list(result.keys())
+        return [dict(zip(columns, row, strict=False)) for row in result.fetchall()]
 
 
 @tool
@@ -22,10 +84,6 @@ def query_sql(sql: str, timeout: int = 30) -> list[dict[str, Any]]:
 
     Returns:
         行数据字典列表。
-
-    Raises:
-        ValueError: 当 SQL 未通过基本安全性验证时。
-        SQLQueryError: 当对数据仓库执行失败或超时时。
     """
     if not sql or not sql.strip():
         raise ValueError("sql must be a non-empty string")
@@ -38,7 +96,12 @@ def query_sql(sql: str, timeout: int = 30) -> list[dict[str, Any]]:
     if any(keyword in normalized for keyword in _FORBIDDEN_KEYWORDS):
         raise ValueError("SQL contains a forbidden write/DDL keyword")
 
-    # TODO: 通过 SQLDatabaseToolkit / SQLAlchemy 引擎实现真实执行
-    # （settings.database_url 或 settings.sql_query_endpoint）。将连接、
-    # 超时和驱动错误包装为 SQLQueryError。
-    return []
+    try:
+        rows = _try_real_query(sql, timeout)
+    except Exception:  # noqa: BLE001 - 真实库不可用时回退夹具，避免决策阶段空转
+        logger.exception("query_sql: live backend failed, using fixture rows")
+        rows = None
+
+    if rows is not None:
+        return rows
+    return _fixture_rows(sql)

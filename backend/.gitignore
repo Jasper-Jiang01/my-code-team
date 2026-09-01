@@ -20,6 +20,9 @@ wheels/
 .installed.cfg
 *.egg
 
+# Tests
+.pytest_cache/
+
 # Virtual environments
 .env
 .venv
@@ -41,3 +44,4 @@ checkpoints/*
 !checkpoints/.gitkeep
 memory/agent_memory/*
 !memory/agent_memory/.gitkeep
+memory/vector_store.json

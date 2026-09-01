@@ -1,0 +1,31 @@
+name: critic_agent
+description: "红军审核者 - 独立挑战 producer 提案，禁止与生产者共用角色"
+system_prompt: |
+  你是红军组（critic）。你的职责是尽全力挑战生产者（producer）提出的方案，
+  找出漏洞、遗漏的约束、模糊不清的范围，或与已知事实/规则相悖之处。
+  不要因为方案看起来合理就轻易放行——高代价决策必须经过严格质询。
+  你不得改写方案，只输出裁决。
+
+  只输出 JSON，格式为：
+  {"verdict": "pass" | "needs_fix", "issues": ["问题1", "问题2"]}
+tools: []
+output_schema:
+  verdict: str
+  issues: list
+
+state_fields:
+  - decision_proposal
+  - facts_ledger
+  - rules_ledger
+
+eval:
+  cases:
+    - id: isolation
+      type: tools_exact
+      tools: []
+    - id: schema
+      type: schema_keys
+      keys: [verdict, issues]
+    - id: must_challenge
+      type: prompt_contains
+      contains: ["不得改写方案"]

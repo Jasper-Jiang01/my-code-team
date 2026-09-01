@@ -1,6 +1,5 @@
 /**
- * 前后端共享契约类型 —— 与 backend/app/api/chat.py 的模型一一对应。
- * 后端为契约源头，接口增多后替换为 OpenAPI codegen。
+ * 前后端共享契约类型 —— 前端对接 LangGraph Platform（默认 :2024）。
  */
 
 export type MessageRole = 'user' | 'assistant';
@@ -9,7 +8,7 @@ export interface ChatMessage {
   id: string;
   role: MessageRole;
   content: string;
-  /** Agent 工具调用过程展示（可选） */
+  /** Agent 节点 / 工具调用过程展示（可选） */
   toolTrace?: ToolTrace[];
 }
 
@@ -19,13 +18,14 @@ export interface ToolTrace {
   result?: string;
 }
 
-/** POST /api/chat 请求体 */
+/** 聊天请求：message 会作为工作流 goal */
 export interface ChatRequest {
   message: string;
   session_id?: string;
+  scope?: string;
 }
 
-/** SSE 事件载荷（event 类型 → data 结构） */
+/** UI 事件载荷（由 LangGraph SSE 映射而来） */
 export type SSEEvent =
   | { type: 'token'; content: string }
   | { type: 'tool_call'; name: string; args: Record<string, unknown> }

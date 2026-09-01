@@ -6,15 +6,10 @@
         -> 01 explore (EXPLORE 需求增量)
         -> 02 generate (GENERATE 设计草稿)
         -> 03 guard (GUARD DP 审核)
-        -> 04 build (BUILD 开发实现)
+            -> 未通过且未达轮次上限：回到 generate
+            -> 通过或强制继续：04 build
         -> 05 compare (COMPARE 视觉还原)
         -> 06 verify (VERIFY QA 验收，汇总 demo_artifact)
-
-这是一个**不可缺步的静态子流程**：每一步严格按顺序执行，
-通过 Checkpoint 证明真实完成。
-
-读/写：``demo_artifact``（由本子图拥有）。
-使用的工具：``deploy_demo``、``screenshot_diff``（通过 ``design`` Agent Harness）。
 """
 
 from langgraph.graph import END, StateGraph
@@ -31,13 +26,22 @@ from codepilot.nodes import (
 )
 from codepilot.states.workflow_state import WorkflowState
 
+_MAX_GUARD_ROUNDS = 3
+
+
+def _after_guard(state: WorkflowState) -> str:
+    """GUARD 未通过时回到 GENERATE；达到轮次上限后强制进入 BUILD。"""
+    audit = state.get("design_audit") or {}
+    round_count = int(state.get("production_guard_round") or 0)
+    if audit.get("approved", False):
+        return "build"
+    if round_count >= _MAX_GUARD_ROUNDS:
+        return "build"
+    return "generate"
+
 
 def build_production_graph() -> CompiledStateGraph:
-    """构建生产子图（静态六步子流程）。
-
-    Returns:
-        编译好的 StateGraph 实例。
-    """
+    """构建生产子图（静态六步子流程，GUARD 可回环）。"""
     builder = StateGraph(WorkflowState)
 
     builder.add_node("execute_produce", execute_produce)
@@ -52,7 +56,11 @@ def build_production_graph() -> CompiledStateGraph:
     builder.add_edge("execute_produce", "explore")
     builder.add_edge("explore", "generate")
     builder.add_edge("generate", "guard")
-    builder.add_edge("guard", "build")
+    builder.add_conditional_edges(
+        "guard",
+        _after_guard,
+        {"build": "build", "generate": "generate"},
+    )
     builder.add_edge("build", "compare")
     builder.add_edge("compare", "verify")
     builder.add_edge("verify", END)
@@ -60,5 +68,4 @@ def build_production_graph() -> CompiledStateGraph:
     return builder.compile()
 
 
-# 模块级别的已编译子图实例，用于独立测试／组合到主工作流图中。
 graph = build_production_graph()

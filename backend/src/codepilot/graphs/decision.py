@@ -1,23 +1,25 @@
 """决策子图 — 阶段 3-4：data测算 与 指标与方案。
 
-流程（根据技术方案第 3.1 / 4.3 节的对抗式验证）：
-
-    execute_data（指标验证与规模估算）
-        -> producer（起草方案）
+流程：
+    execute_data
+        -> fan_out 3 个 candidate_producer（生成过滤）
+        -> filter_candidates
+        -> tournament 两两比较
         -> critic（红军挑战）
-        -> needs_fix？ -> 回到 producer
+        -> needs_fix？ -> producer 修订胜者
         -> pass？      -> judge（锁定 spec + evidence）
-
-读/写：``spec`` / ``evidence``（由本子图拥有）。
-使用的工具：``query_sql``（通过 ``data`` Agent Harness）。
-循环契约：``critic`` 在有限轮数后会强制通过
-（参见 ``nodes.critic._MAX_ROUNDS``），以保证循环一定收敛。
 """
 
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from codepilot.nodes import critic, execute_data, judge, producer
+from codepilot.nodes.tournament import (
+    candidate_producer,
+    fan_out_candidates,
+    filter_candidates,
+    tournament,
+)
 from codepilot.states.workflow_state import WorkflowState
 
 
@@ -27,30 +29,35 @@ def _needs_fix(state: WorkflowState) -> str:
 
 
 def build_decision_graph() -> CompiledStateGraph:
-    """构建决策子图。
-
-    Returns:
-        编译好的 StateGraph 实例。
-    """
+    """构建决策子图。"""
     builder = StateGraph(WorkflowState)
 
     builder.add_node("execute_data", execute_data)
+    builder.add_node("candidate_producer", candidate_producer)
+    builder.add_node("filter_candidates", filter_candidates)
+    builder.add_node("tournament", tournament)
     builder.add_node("producer", producer)
     builder.add_node("critic", critic)
     builder.add_node("judge", judge)
 
     builder.set_entry_point("execute_data")
-    builder.add_edge("execute_data", "producer")
-    builder.add_edge("producer", "critic")
+    builder.add_conditional_edges(
+        "execute_data",
+        fan_out_candidates,
+        ["candidate_producer"],
+    )
+    builder.add_edge("candidate_producer", "filter_candidates")
+    builder.add_edge("filter_candidates", "tournament")
+    builder.add_edge("tournament", "critic")
     builder.add_conditional_edges(
         "critic",
         _needs_fix,
         {"fix": "producer", "pass": "judge"},
     )
+    builder.add_edge("producer", "critic")
     builder.add_edge("judge", END)
 
     return builder.compile()
 
 
-# 模块级别的已编译子图实例，用于独立测试／组合到主工作流图中。
 graph = build_decision_graph()

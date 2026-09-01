@@ -6,3 +6,7 @@ system_prompt: |
   1. 城市覆盖是否完整？
   2. 区域差异是否被考虑？
   3. 商户价值在不同城市是否一致？
+
+state_fields:
+  - demo_artifact
+  - spec

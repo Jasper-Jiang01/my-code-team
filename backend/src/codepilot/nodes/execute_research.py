@@ -4,6 +4,7 @@ import json
 import logging
 
 from codepilot.core.agent_loader import invoke_agent
+from codepilot.core.context_views import format_state_context
 from codepilot.core.llm_utils import extract_json, safe_content
 from codepilot.core.memory_store import load_project_memory
 from codepilot.states.workflow_state import WorkflowState
@@ -13,8 +14,8 @@ logger = logging.getLogger(__name__)
 _MAX_SEED_QUERIES = 5
 
 _RESEARCH_TASK_TEMPLATE = """\
-目标（goal）：{goal}
-范围（scope）：{scope}
+你被授权读取的 State Bus 字段：
+{context}
 
 历史项目记忆中的已知关键词（可参考，不必全部使用）：{known_keywords}
 
@@ -48,15 +49,13 @@ def execute_research(state: WorkflowState) -> dict:
         包含 ``research_queries`` 和更新后 checkpoint 标记的字典。
     """
     goal = state.get("goal", "")
-    scope = state.get("scope", "")
 
     seed_queries: list[str] = []
     if goal:
         try:
             project_memory = load_project_memory()
             task = _RESEARCH_TASK_TEMPLATE.format(
-                goal=goal,
-                scope=scope or "未指定",
+                context=format_state_context(state, "research"),
                 known_keywords=project_memory.get("keywords", []),
                 max_queries=_MAX_SEED_QUERIES,
             )

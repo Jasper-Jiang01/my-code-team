@@ -6,3 +6,7 @@ system_prompt: |
   1. 供给冷启动是否可行？
   2. 商业循环是否完整？
   3. 收藏与专辑体验是否一致？
+
+state_fields:
+  - demo_artifact
+  - spec

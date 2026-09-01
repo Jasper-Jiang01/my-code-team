@@ -38,9 +38,9 @@ export function ChatPage() {
               <div className="empty-logo">C</div>
               <div className="empty-title">今天能帮你做点什么？</div>
               <div className="empty-examples">
-                试着问：帮我找一个 debounce 的实现示例
+                试着问：经营周报点击率口径怎么定
                 <br />
-                或者：review 这段代码：var a = 1; if (a == '1') console.log('ok')
+                或者：做一个商家供给冷启动 Demo
               </div>
             </div>
           )}

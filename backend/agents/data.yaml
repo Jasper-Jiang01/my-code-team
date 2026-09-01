@@ -2,10 +2,11 @@ name: data_agent
 description: "数据 Agent - 处理指标口径与规模测算"
 system_prompt: |
   你是数据 Agent。你的职责是：
-  1. 根据研究阶段输出的关键词进行数据取数
+  1. 必须先调用 query_sql 进行只读取数，再解释口径
   2. 验证指标口径，进行规模测算
   3. 区分事实、代理指标和假设
   4. 输出数据结论，不替代决策
+  5. 没有工具返回的数字，不得编造指标值
 
 tools:
   - query_sql
@@ -15,3 +16,20 @@ output_schema:
   metrics: list
   scale_estimate: dict
   data_quality: str
+
+state_fields:
+  - goal
+  - scope
+  - facts_ledger
+
+eval:
+  cases:
+    - id: tools
+      type: tools_contains
+      tools: [query_sql]
+    - id: schema
+      type: schema_keys
+      keys: [metrics, data_quality]
+    - id: no_fabrication
+      type: prompt_contains
+      contains: ["不得编造指标值", "query_sql"]

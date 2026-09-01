@@ -1,93 +1,82 @@
-# CodePilot 技术方案
+# CodePilot 架构
 
-## 1. 系统定位
+CodePilot 是多 Agent 动态工作流：前端聊天提出目标，LangGraph Platform 编排四个子图（研究 / 决策 / 生产 / 评审），状态走共享 State Bus，门禁与人工确认通过 Checkpoint 与 `interrupt` 落地。
 
-CodePilot 是一个 AI 编码副驾驶：用户在前端以聊天方式提出编码任务，后端 Agent 基于 LangGraph 进行多步推理（ReAct 循环），可调用工具完成代码检索、生成、检查等动作，并以 SSE 流式逐 token 返回。
-
-## 2. 总体架构
+## 1. 总体架构
 
 ```
-┌─────────────────────┐         SSE (HTTP POST)        ┌──────────────────────────┐
-│  Frontend (React)   │ ─────────────────────────────► │  Backend (FastAPI)       │
-│  Vite + TS + SSE    │ ◄───────────────────────────── │  Controller (api/)       │
-│  流式渲染聊天 UI     │   token / tool_call / done     │    │                     │
-└─────────────────────┘                                │    ▼                     │
-                                                       │  Agent (LangGraph)       │
-                                                       │   agent ⇄ tools 循环     │
-                                                       │   state: messages        │
-                                                       │   checkpointer: memory   │
-                                                       │    │                     │
-                                                       │    ▼                     │
-                                                       │  LLM Factory             │
-                                                       │   ChatOpenAI / MockLLM   │
-                                                       └──────────────────────────┘
+┌─────────────────────┐     POST /threads/{id}/runs/stream     ┌──────────────────────────┐
+│  Frontend (React)   │ ─────────────────────────────────────► │  LangGraph Platform      │
+│  Vite + TS          │ ◄───────────────────────────────────── │  :2024  langgraph dev    │
+│  映射 updates/SSE    │   updates / messages / interrupt       │                          │
+└─────────────────────┘                                        │  graph: main_workflow    │
+                                                               │    classify              │
+                                                               │    research 子图         │
+                                                               │    data 子图 + 锦标赛     │
+                                                               │    produce 六步静态流     │
+                                                               │    qa 评委 + 三道门       │
+                                                               │    human_confirm         │
+                                                               │                          │
+                                                               │  State Bus + Checkpointer│
+                                                               │  SQLite / PostgresSaver  │
+                                                               └──────────────────────────┘
 ```
 
-### 分层职责
+本地启动：`cd backend && make run`（`langgraph dev`），Studio / API 在 `http://127.0.0.1:2024`。图 id 为 `main_workflow`（见 `backend/langgraph.json`）。
+
+## 2. 分层职责
 
 | 层 | 位置 | 职责 | 禁止 |
 |----|------|------|------|
-| Controller | `app/api/` | 解析请求、校验、调用 Agent、格式化 SSE | 业务逻辑、直接访问 LLM |
-| Agent | `app/agents/` | 图编排、工具注册、状态管理 | HTTP 类型 |
-| LLM | `app/llm/` | 模型实例化、降级策略 | 业务逻辑 |
-| 横切 | config / errors / logging | 配置、错误、日志 | — |
+| 前端 | `frontend/` | 创建 thread、订阅 runs/stream、渲染节点轨迹 | 直连 LLM、绕过门禁 |
+| 主图 | `graphs/main_workflow.py` | 四闭环编排与 QA 后 rerun | 把子图逻辑摊进主图 |
+| 子图 | `graphs/{problem_discovery,decision,production,review}.py` | 各自拥有的 State Bus 字段 | 跨子图偷偷改别人的台账 |
+| Harness | `backend/agents/*.yaml` | 角色、工具、output_schema、state_fields | 一个 YAML 同时扮演生产与审核 |
+| Skills | `backend/skills/` | 工具入口（search_km / query_sql / 截图 / 部署等） | 在节点里复制工具实现 |
+| State Bus | `states/` | 事实/规则/问题台账、规格、产物、门禁 | `operator.add` 膨胀台账 |
+| Checkpoint | `core/checkpointer.py` | 平台注入 / SqliteSaver / PostgresSaver | 给 Platform 再挂一份进程内 saver |
 
-## 3. 关键技术决策与依据
+## 3. 关键技术决策
 
-### 3.1 流式通道：SSE（而非 WebSocket / 轮询）
+### 3.1 运行时：LangGraph Platform，而不是自建 FastAPI 聊天接口
 
-- Agent 响应是单向推送（服务端→客户端），SSE 恰好匹配；WebSocket 的双向能力、心跳、重连复杂度是过度设计
-- 对话需要 POST body，故前端用 `fetch` + `ReadableStream` 手动解析 SSE 帧（与 OpenAI SDK 同款做法）
-- 过代理/网关友好（纯 HTTP），后续要上 Nginx 无需额外协议升级
+主图以原生子图挂到 `main_workflow`，演示门 `interrupt` 后用 `Command(resume={'approved': true})` 恢复。前端默认 `VITE_API_BASE_URL=http://localhost:2024`，`POST /threads` 再 `POST /threads/{id}/runs/stream`，`assistant_id` 为 `main_workflow`。
 
-### 3.2 Agent 编排：LangGraph ReAct
+### 3.2 State Bus 与 Prompt 裁剪
 
-- 裸 LangChain Chain 无法表达「调用工具 → 观察结果 → 再决策」的循环；LangGraph 将 Agent 建模为状态图，原生支持条件边、循环、checkpointer
-- 状态 `AgentState.messages` 使用 `add_messages` reducer 累积对话，天然形成短期记忆
-- Checkpointer MVP 用 `InMemorySaver`（单实例够用），生产替换 `PostgresSaver` / `RedisSaver` 仅需改工厂，路由/Agent 代码零改动——这是选 LangGraph 的核心收益
+每个 Harness 声明 `state_fields`。节点通过 `slice_state` / `format_state_context` 只注入允许字段，避免把整份 facts/rules/issues dump 进每个 Agent。
 
-### 3.3 LLM 接入：工厂 + 降级
+### 3.3 结构化输出
 
-- `llm/factory.py` 统一实例化：配置了 `OPENAI_API_KEY` → `ChatOpenAI`（支持 `OPENAI_BASE_URL` 指向兼容网关/自部署模型）；未配置 → MockEchoLLM
-- 降级保证：无 Key 环境（新同学 clone、CI）也能全链路跑通前端流式 UI，不被环境阻塞
+`invoke_agent` 在 tool-call 循环结束后，用 Pydantic 按 YAML `output_schema` 校验；失败再试 `with_structured_output`。台账条目由 `FactEntryModel` / `IssueEntryModel` 构造。
 
-### 3.4 类型契约：Pydantic 为源，手写 TS 镜像
+### 3.4 记忆与 Checkpoint
 
-- 前后端异构（TS/Python），tRPC 不适用；当前接口面小（chat + health），手写 `types/chat.ts` 与后端 `ChatRequest`/SSE 事件模型一一对应，成本最低
-- 接口增长到 10+ 后，引入 `openapi-typescript` 从 FastAPI 自动生成的 openapi.json 生成 TS 类型，替换手写
+- 分域 Agent 记忆 + `vector_memory`（持久化 JSON + embedding cosine）
+- 占位 `DATABASE_URL` 不会当成活库；真实 Postgres 时用 PostgresSaver
+- 本地默认 SqliteSaver 写到 `backend/checkpoints/main.sqlite`
+- `langgraph.json` 导出的 `graph` **不**预挂进程内 checkpointer，交给平台注入
 
-### 3.5 后端框架：FastAPI
+### 3.5 视觉对比
 
-- LLM 调用是 IO 密集型，async/await 是刚需；FastAPI 原生 async + `StreamingResponse` 直接支撑 SSE
-- Pydantic 内建请求校验（边界处信任为零），`pydantic-settings` 做集中配置 + 启动 fail-fast
+GENERATE 写出 `design.html`，BUILD 用 REPL 写出 `index.html`。COMPARE 对这两份 HTML 截图（Playwright，否则 DOM 光栅化），再 `screenshot_diff`。占位图标记 `mode: placeholder` 时视觉门不得通过。
 
-### 3.6 前端：Vite + React 18 + TS（不用 Next.js）
+## 4. 前端事件映射
 
-- 纯客户端聊天应用，无 SEO/SSR 需求；Vite 冷启动与 HMR 快，构建产物静态化部署成本低
-- 状态管理：MVP 用组件内 `useState` + 自定义 Hook；会话列表/多会话管理复杂化后再引入 Zustand
+LangGraph SSE 被映射为 UI 事件：
 
-## 4. 横切关注点
+| 平台事件 | UI |
+|----------|-----|
+| `updates` 节点输出 | `tool_call` / `tool_result` |
+| `messages` 文本 | `token` |
+| `__interrupt__` | `token`（演示门提示） |
+| `end` | `done`（携带 `thread_id`） |
+| `error` | `error` |
 
-- **配置**：全部环境变量，`Settings` 启动时校验；`.env.example` 入库，真实密钥永不入库
-- **错误**：`AppError` 类型化体系 + 全局异常处理器统一 JSON 格式，含 request_id；程序性错误只记日志不泄栈
-- **日志**：结构化 JSON，request-id 中间件生成并注入，所有日志可按请求串联
-- **可观测**：`/health`（存活）+ `/ready`（就绪，报告 LLM 配置状态）；SSE `done` 帧携带会话元信息
-- **安全**：CORS 显式白名单（dev 为 5173）；输入校验全量覆盖；密钥只走环境变量
+演示门恢复：在 Studio 或 API 对同一 thread 发送 `Command(resume={'approved': true, 'comment': '...'})`。
 
-## 5. SSE 事件协议（前后端契约）
+## 5. 本地开发
 
-```
-event: token        data: {"content": "每"}
-event: tool_call    data: {"name": "search_code", "args": {...}}
-event: tool_result  data: {"name": "search_code", "result": "..."}
-event: done         data: {"session_id": "..."}
-event: error        data: {"code": "AGENT_ERROR", "message": "..."}
-```
-
-## 6. 演进路线
-
-1. **MVP（当前）**：单会话 ReAct Agent + SSE 流式 + Mock 降级
-2. **多会话**：`thread_id` 透传 + Postgres checkpointer + 会话列表接口
-3. **真实工具**：接入文件系统读写、代码检索（ripgrep）、沙箱执行
-4. **人审**（Human-in-the-loop）：LangGraph `interrupt` + 前端审批 UI
-5. **生产化**：OpenAPI codegen 类型链路、Rate limit、结构化 tracing（LangSmith）
+1. `cd backend && make run` → `http://127.0.0.1:2024`
+2. `cd frontend && npm run dev` → Vite 默认 5173，请求打到 2024
+3. `cd backend && make test` / `make eval`

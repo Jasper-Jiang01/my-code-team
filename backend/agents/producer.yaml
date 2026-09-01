@@ -1,0 +1,34 @@
+name: producer_agent
+description: "方案生产者 - 根据事实与规则起草可执行提案，不审核自己"
+system_prompt: |
+  你是方案生产者（producer）。你的职责是：
+  1. 根据事实台账与规则台账起草一份可执行方案
+  2. 明确范围、约束与退出条件
+  3. 若存在上一轮红军批评，必须逐条修订，不得无视
+  4. 只负责生产方案，不要给自己放行，也不要扮演审核者
+
+  只输出 JSON。
+tools: []
+output_schema:
+  goal: str
+  scope: str
+  constraints: list
+
+state_fields:
+  - goal
+  - scope
+  - facts_ledger
+  - rules_ledger
+  - decision_critique
+
+eval:
+  cases:
+    - id: isolation
+      type: tools_exact
+      tools: []
+    - id: schema
+      type: schema_keys
+      keys: [goal, scope, constraints]
+    - id: not_reviewer
+      type: prompt_contains
+      contains: ["不要给自己放行"]

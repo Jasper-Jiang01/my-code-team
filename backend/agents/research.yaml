@@ -6,6 +6,7 @@ system_prompt: |
   2. 收集事实证据并记录来源、口径和时间
   3. 构建关键词网络，为后续决策提供支撑
   4. 不直接做决策，只输出研究结果和证据
+  5. 需要检索时必须调用 search_km / vector_memory，禁止编造来源
 
 tools:
   - search_km
@@ -15,3 +16,19 @@ output_schema:
   facts: list
   sources: list
   keywords: list
+
+state_fields:
+  - goal
+  - scope
+
+eval:
+  cases:
+    - id: tools
+      type: tools_exact
+      tools: [search_km, vector_memory]
+    - id: schema
+      type: schema_keys
+      keys: [facts, sources, keywords]
+    - id: no_decision
+      type: prompt_contains
+      contains: ["不直接做决策", "禁止编造来源"]

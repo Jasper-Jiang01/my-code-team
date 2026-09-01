@@ -29,6 +29,7 @@ def execute_produce(state: WorkflowState) -> dict:
 
     return {
         "production_step": 0,
+        "production_guard_round": 0,
         "design_draft": None,
         "design_audit": None,
         "build_artifact": None,

@@ -2,7 +2,6 @@
 name = "codepilot"
 version = "0.1.0"
 description = "Multi-Agent Dynamic Workflow System based on LangGraph + LangChain"
-readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "langgraph>=0.2.0",
@@ -17,9 +16,9 @@ dependencies = [
     "httpx>=0.27.0",
     "sqlalchemy>=2.0.0",
     "psycopg2-binary>=2.9.0",
-    "chromadb>=0.5.0",
     "pyyaml>=6.0.0",
     "pillow>=10.0.0",
+    "langgraph-checkpoint-sqlite>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +28,12 @@ dev = [
     "ruff>=0.6.0",
     "mypy>=1.11.0",
     "langgraph-cli[inmem]>=0.2.0",
+]
+vector = [
+    "chromadb>=0.5.0",
+]
+postgres = [
+    "langgraph-checkpoint-postgres>=2.0.0",
 ]
 
 [build-system]
@@ -45,3 +50,14 @@ target-version = "py312"
 [tool.mypy]
 python_version = "3.12"
 strict = true
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
+extraPaths = ["src"]
+
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

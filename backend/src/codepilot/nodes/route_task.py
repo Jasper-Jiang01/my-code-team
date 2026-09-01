@@ -12,4 +12,4 @@ def route_task(state: WorkflowState) -> str:
     Returns:
         用于条件边路由的目标节点名称。
     """
-    return state.get("next_step", "research")
+    return state.get("next_step") if state.get("next_step") in {"research", "data", "produce", "qa"} else "research"

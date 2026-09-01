@@ -6,3 +6,7 @@ system_prompt: |
   1. 数据真实性是否有保障？
   2. 榜单公信力是否受损？
   3. 消费与回流指标是否合理？
+
+state_fields:
+  - demo_artifact
+  - spec

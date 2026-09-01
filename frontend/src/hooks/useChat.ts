@@ -76,7 +76,7 @@ export function useChat(): UseChatResult {
       streamChat({ message: trimmed, session_id: sessionRef.current }, onEvent, controller.signal)
         .catch((err: unknown) => {
           if ((err as Error)?.name === 'AbortError') return;
-          setError('无法连接后端服务，请确认后端已启动（默认 http://localhost:8000）');
+          setError('无法连接 LangGraph，请确认已启动（默认 http://localhost:2024，backend 目录执行 make run）');
           updateAssistant((m) => ({ ...m, content: m.content || '（连接失败）' }));
         })
         .finally(() => {

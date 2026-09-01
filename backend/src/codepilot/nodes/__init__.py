@@ -9,6 +9,11 @@ from codepilot.nodes.execute_research import execute_research
 from codepilot.nodes.execute_review import execute_review
 from codepilot.nodes.human_confirm import human_confirm
 from codepilot.nodes.judge import judge
+from codepilot.nodes.loop_control import (
+    mark_decision_snapshot,
+    mark_production_snapshot,
+    route_after_qa,
+)
 from codepilot.nodes.producer import producer
 from codepilot.nodes.production_steps import (
     build,
@@ -31,6 +36,12 @@ from codepilot.nodes.review_steps import (
 )
 from codepilot.nodes.route_task import route_task
 from codepilot.nodes.synthesize_results import synthesize_results
+from codepilot.nodes.tournament import (
+    candidate_producer,
+    fan_out_candidates,
+    filter_candidates,
+    tournament,
+)
 
 __all__ = [
     "build",
@@ -51,13 +62,20 @@ __all__ = [
     "human_confirm",
     "judge",
     "loop_condition",
+    "mark_decision_snapshot",
+    "mark_production_snapshot",
     "panel",
     "producer",
     "rehearsal_gate",
     "researcher",
     "review_fan_out",
+    "route_after_qa",
     "route_task",
     "synthesize_results",
+    "tournament",
+    "candidate_producer",
+    "fan_out_candidates",
+    "filter_candidates",
     "verify",
     "visual_gate",
 ]

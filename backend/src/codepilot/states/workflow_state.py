@@ -1,29 +1,39 @@
 """所有 Agent 和图共享的全局工作流状态。"""
 
-from operator import add
 from typing import Annotated, TypedDict
 
+from codepilot.states.reducers import unique_extend, upsert_by_id
 
-class FactEntry(TypedDict):
-    """事实台账中的单条事实条目。"""
 
+class FactEntry(TypedDict, total=False):
+    """事实台账中的单条事实条目（来源 / 口径 / 取值 / 时间）。"""
+
+    id: str
     source: str
     metric: str
+    definition: str
+    value: str
+    url: str
+    snippet: str
     timestamp: str
 
 
-class RuleEntry(TypedDict):
+class RuleEntry(TypedDict, total=False):
     """规则台账中的单条规则条目。"""
 
+    id: str
     domain: str
     content: str
 
 
-class IssueEntry(TypedDict):
-    """问题台账中的单条问题条目。"""
+class IssueEntry(TypedDict, total=False):
+    """问题台账中的单条问题条目（风险 / 证据 / 修复 / 验收）。"""
 
+    id: str
+    source: str
     risk: str
     fix: str
+    evidence: str
     status: str
 
 
@@ -42,11 +52,12 @@ class Evidence(TypedDict):
     rules: list[RuleEntry]
 
 
-class Demo(TypedDict):
+class Demo(TypedDict, total=False):
     """在生产阶段产出的 Demo 产物。"""
 
     artifact_path: str
     version: str
+    fix_notes: list[str]
 
 
 class QAReport(TypedDict):
@@ -64,13 +75,13 @@ class WorkflowState(TypedDict):
     # 目标与约束
     goal: str
     scope: str
-    constraints: Annotated[list[str], add]
-    exit_conditions: Annotated[list[str], add]
+    constraints: Annotated[list[str], unique_extend]
+    exit_conditions: Annotated[list[str], unique_extend]
 
-    # 三大台账
-    facts_ledger: Annotated[list[FactEntry], add]
-    rules_ledger: Annotated[list[RuleEntry], add]
-    issues_ledger: Annotated[list[IssueEntry], add]
+    # 三大台账（按 id upsert，允许更新 status / 证据而不重复膨胀）
+    facts_ledger: Annotated[list[FactEntry], upsert_by_id]
+    rules_ledger: Annotated[list[RuleEntry], upsert_by_id]
+    issues_ledger: Annotated[list[IssueEntry], upsert_by_id]
 
     # 阶段产物
     spec: Spec | None
@@ -79,32 +90,40 @@ class WorkflowState(TypedDict):
     qa_report: QAReport | None
 
     # 控制信号
-    checkpoints: Annotated[list[str], add]
+    checkpoints: Annotated[list[str], unique_extend]
     next_step: str
     human_confirm: bool | None
 
     # 内部工作字段（不属于核心 State Bus 契约的一部分，仅用于
     # 在单个子图运行内在节点之间传递数据）
-    research_queries: list[str]  # 由 execute_research 产出用于 fan-out 的种子查询
-    research_findings: Annotated[list[FactEntry], add]  # 每个查询的发现，由 synthesize_results 合并
+    research_queries: list[str]
+    research_findings: Annotated[list[FactEntry], upsert_by_id]
 
     # DecisionGraph 对抗式验证的工作字段
-    decision_proposal: dict | None  # 由 `producer` 产出的最新提案
-    decision_critique: dict | None  # 由 `critic` 产出的最新批评
-    decision_verdict: str | None  # "pass" | "needs_fix"，由 `critic` 设置
-    decision_round: int  # 到目前为止 producer -> critic 的轮数（循环保护）
+    decision_proposal: dict | None
+    decision_critique: dict | None
+    decision_verdict: str | None
+    decision_round: int
+    decision_candidates: Annotated[list[dict], upsert_by_id]
+    decision_shortlist: list[dict]
+
+    # 闭环间 rerun 指纹
+    last_decided_facts_fp: str
+    last_produced_spec_fp: str
+    loop_rerun_count: int
 
     # ProductionGraph 静态六步子流程的工作字段
-    production_step: int  # 当前静态子流程步号（1-6）
-    design_draft: dict | None  # 02 设计草稿（GENERATE）
-    design_audit: dict | None  # 03 DP 审核（GUARD）结果
-    build_artifact: dict | None  # 04 开发实现（BUILD）产出
-    visual_compare: dict | None  # 05 视觉还原（COMPARE）结果
+    production_step: int
+    production_guard_round: int
+    design_draft: dict | None
+    design_audit: dict | None
+    build_artifact: dict | None
+    visual_compare: dict | None
 
     # ReviewGraph 对抗式评审的工作字段
-    review_panel_results: Annotated[list[dict], add]  # 五岗位评委的独立评审结论
-    review_issues: Annotated[list[IssueEntry], add]  # 评委发现的问题（合并到 issues_ledger）
-    review_round: int  # fix_agent 修复轮数（循环保护）
-    function_gate: dict | None  # 功能门检查结果
-    visual_gate: dict | None  # 视觉门检查结果
-    rehearsal_gate: dict | None  # 演示门检查结果
+    review_panel_results: Annotated[list[dict], upsert_by_id]
+    review_issues: Annotated[list[IssueEntry], upsert_by_id]
+    review_round: int
+    function_gate: dict | None
+    visual_gate: dict | None
+    rehearsal_gate: dict | None

@@ -2,8 +2,9 @@
 
 import logging
 
-from codepilot.core.memory_store import update_project_memory
+from codepilot.core.memory_store import update_agent_memory, update_project_memory
 from codepilot.states.workflow_state import WorkflowState
+from codepilot.tools import vector_memory
 
 logger = logging.getLogger(__name__)
 
@@ -13,26 +14,36 @@ def synthesize_results(state: WorkflowState) -> dict:
 
     收集累积在 ``research_findings`` 中的每个查询发现（由并行的
     ``researcher`` 分支通过 ``Send`` 填充），将其合并到 ``facts_ledger``，
-    并将其中的关键词持久化到项目记忆中（根据设计文档，仅限于
-    ``ProblemDiscoveryGraph``）。
-
-    Args:
-        state: 当前的工作流状态。
-
-    Returns:
-        包含更新后 ``facts_ledger`` 和完成 checkpoint 的字典。
+    并把关键词 / 证据索引写入项目记忆和向量记忆。
     """
-    findings = state.get("research_findings", [])
+    findings = [item for item in (state.get("research_findings") or []) if item.get("value") or item.get("snippet")]
 
     if not findings:
         logger.info("synthesize_results: no research findings to synthesize")
         return {"checkpoints": ["research_done"]}
 
-    keywords = [f["metric"] for f in findings if f.get("metric")]
+    keywords = [item["metric"] for item in findings if item.get("metric")]
     try:
         update_project_memory(keywords=keywords, research_index=findings)
     except Exception:  # noqa: BLE001 - 记忆持久化失败不得阻塞图的执行
         logger.exception("synthesize_results: failed to persist project memory")
+
+    try:
+        update_agent_memory(
+            "research_agent",
+            keywords=keywords,
+            last_fact_count=len(findings),
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("synthesize_results: failed to persist agent memory")
+
+    for fact in findings:
+        try:
+            vector_memory.invoke(
+                {"action": "add", "collection": "project_memory", "data": dict(fact)}
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("synthesize_results: failed to index fact in vector memory")
 
     return {
         "facts_ledger": findings,

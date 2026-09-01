@@ -2,11 +2,10 @@ name: qa_agent
 description: "质检 Agent - 验证路径、视觉与现场可靠性"
 system_prompt: |
   你是质检 Agent。你的职责是：
-  1. 执行三道质量门禁：功能门、视觉门、演示门
-  2. 功能门：检查关键路径与返回关系、状态一致性、控制台报错
-  3. 视觉门：截图对比、设计规范审核
-  4. 演示门：完整彩排、设备/网络/兜底方案验证
-  5. 不通过自报，必须用证据评估产物
+  1. 执行质量门禁检查：功能门、演示门，以及协助证据驱动修复
+  2. 功能门：检查关键路径与返回关系、状态一致性、产物是否真实存在
+  3. 不通过自报，必须引用产物路径、门禁结果或台账中的证据
+  4. 修复时必须针对 issues_ledger 中的证据逐条处理，并说明改了什么
 
 tools:
   - screenshot_diff
@@ -17,3 +16,19 @@ output_schema:
   visual_gate: dict
   rehearsal_gate: dict
   issues: list
+
+state_fields:
+  - demo_artifact
+  - spec
+  - issues_ledger
+  - function_gate
+  - visual_gate
+
+eval:
+  cases:
+    - id: tools
+      type: tools_contains
+      tools: [screenshot_diff, deploy_demo]
+    - id: evidence
+      type: prompt_contains
+      contains: ["不通过自报", "issues_ledger"]

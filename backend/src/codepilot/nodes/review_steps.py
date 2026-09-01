@@ -1,31 +1,30 @@
 """ReviewGraph 评审阶段的节点实现。
 
 根据技术方案第 3.1 / 7 节，评审阶段包含：
-- 五岗位评委（review_panels/*.yaml）并行评审，使用 ``Send`` fan-out；
+- 五岗位评委并行评审；
 - 三道门禁严格串联：功能门 -> 视觉门 -> 演示门；
-- ``fix_agent`` 证据驱动修复，修复后回到功能门重新走完整串联；
+- ``fix_agent`` 证据驱动修复，修复后回到功能门；
 - ``loop_condition`` 判定 ``issues_ledger`` 是否仍有高风险问题。
-
-读写：``issues_ledger`` / ``qa_report``（由本子图拥有）。
-使用的工具：``screenshot_diff``、``deploy_demo``（通过 ``qa`` Agent Harness）。
 """
+
+from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import TypedDict
 
-from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.types import Send
+from langgraph.types import Send, interrupt
 
-from codepilot.core.agent_loader import load_agent_harness
-from codepilot.core.create_model import create_chat_model
+from codepilot.core.agent_loader import invoke_agent
+from codepilot.core.context_views import format_state_context
 from codepilot.core.llm_utils import extract_json, safe_content
+from codepilot.states.entries import make_issue, resolve_issues
 from codepilot.states.workflow_state import IssueEntry, QAReport, WorkflowState
 from codepilot.tools import screenshot_diff
 
 logger = logging.getLogger(__name__)
 
-# 五岗位评委的 Harness 路径（相对于 agents/ 目录）
 _REVIEW_PANELS = (
     "review_panels/platform",
     "review_panels/assets",
@@ -52,200 +51,285 @@ def _parse_json(raw: str, default: dict | None = None) -> dict:
     return dict(default or {})
 
 
+def _issues_from_texts(
+    source: str,
+    texts: list,
+    *,
+    risk: str,
+    evidence: str = "",
+) -> list[IssueEntry]:
+    issues: list[IssueEntry] = []
+    for text in texts:
+        message = str(text).strip()
+        if not message:
+            continue
+        issues.append(
+            make_issue(source=source, message=message, risk=risk, evidence=evidence)
+        )
+    return issues
+
+
+def _open_high_risk(issues: list[IssueEntry]) -> bool:
+    return any(
+        issue.get("risk") == "high" and issue.get("status") != "resolved" for issue in issues
+    )
+
+
 # -- 五岗位评委 fan-out ---------------------------------------------------
 
 
 def review_fan_out(state: WorkflowState) -> list[Send] | str:
-    """为每个评委岗位分发一个 ``panel`` 任务以并行执行。
-
-    当 ``review_round`` 达到上限时跳过评委阶段，直接进入功能门，
-    避免修复循环中重复评审。
-    """
+    """为每个评委岗位分发一个 ``panel`` 任务以并行执行。"""
     round_count = state.get("review_round", 0)
     if round_count > 0:
-        # 修复回环后跳过评委，直接重跑三道门禁
         return "function_gate"
 
     demo = state.get("demo_artifact")
     spec = state.get("spec")
     payload_base = {"demo_artifact": demo, "spec": spec}
-    return [
-        Send("panel", {**payload_base, "panel_ref": ref}) for ref in _REVIEW_PANELS
-    ]
+    return [Send("panel", {**payload_base, "panel_ref": ref}) for ref in _REVIEW_PANELS]
 
 
 def panel(payload: PanelInput) -> dict:
-    """单个评委岗位的评审逻辑。
-
-    Args:
-        payload: 包含 ``panel_ref``、``demo_artifact``、``spec`` 的字典。
-
-    Returns:
-        包含 ``review_panel_results`` 和 ``review_issues`` 的字典。
-    """
+    """单个评委岗位的评审逻辑。结论同时写入 issues_ledger。"""
     panel_ref = payload.get("panel_ref", "")
     if not panel_ref:
-        return {"review_panel_results": [], "review_issues": []}
+        return {"review_panel_results": [], "review_issues": [], "issues_ledger": []}
 
-    harness = load_agent_harness(panel_ref)
+    demo = payload.get("demo_artifact") or {}
+    spec = payload.get("spec") or {}
     task = (
-        f"请评审以下 Demo 产物，从你的否决点角度给出结论。\n"
-        f"Demo: {json.dumps(payload.get('demo_artifact') or {}, ensure_ascii=False)}\n"
-        f"Spec: {json.dumps(payload.get('spec') or {}, ensure_ascii=False)}\n\n"
-        f"只输出 JSON，格式为: "
-        f'{{"verdict": "pass"|"needs_fix"|"reject", "issues": ["问题1", ...]}}'
+        "请评审以下 Demo 产物，从你的否决点角度给出结论。必须引用产物路径或规格中的证据。\n"
+        f"{format_state_context({'demo_artifact': demo, 'spec': spec}, panel_ref)}\n\n"
+        '只输出 JSON，格式为: {"verdict": "pass"|"needs_fix"|"reject", "issues": ["问题1"]}'
     )
 
-    result: dict = {"panel": panel_ref, "verdict": "pass", "issues": []}
+    result: dict = {"id": panel_ref, "panel": panel_ref, "verdict": "pass", "issues": []}
     try:
-        model = create_chat_model()
-        messages = [SystemMessage(content=harness.system_prompt), HumanMessage(content=task)]
-        response = model.invoke(messages)
+        response = invoke_agent(panel_ref, task)
         parsed = _parse_json(safe_content(response))
         if parsed:
             result.update(parsed)
-    except Exception:  # noqa: BLE001 - 单个评委失败不得中断其他评委的 fan-out 分支
+            result["id"] = panel_ref
+            result["panel"] = panel_ref
+    except Exception:  # noqa: BLE001
         logger.exception("panel: failed for panel_ref=%r", panel_ref)
+        result["verdict"] = "needs_fix"
+        result["issues"] = [f"评委 {panel_ref} 执行失败"]
 
-    issues: list[IssueEntry] = []
-    for issue_text in result.get("issues", []):
-        verdict = result.get("verdict", "pass")
-        risk = "high" if verdict == "reject" else "medium"
-        issues.append(
-            {
-                "risk": risk,
-                "fix": str(issue_text),
-                "status": "open",
-            }
-        )
-
-    return {"review_panel_results": [result], "review_issues": issues}
+    verdict = result.get("verdict", "pass")
+    risk = "high" if verdict == "reject" else "medium"
+    evidence = json.dumps({"demo": demo, "verdict": verdict}, ensure_ascii=False)
+    issues = _issues_from_texts(
+        panel_ref,
+        result.get("issues") or [],
+        risk=risk,
+        evidence=evidence,
+    )
+    return {
+        "review_panel_results": [result],
+        "review_issues": issues,
+        "issues_ledger": issues,
+    }
 
 
 # -- 三道门禁 -------------------------------------------------------------
 
 
 def function_gate(state: WorkflowState) -> dict:
-    """功能门 — 检查关键路径与返回关系、状态一致性、控制台报错。
-
-    Args:
-        state: 当前的工作流状态。
-
-    Returns:
-        包含 ``function_gate`` 结果和新增问题的字典。
-    """
+    """功能门 — 先做产物存在性等确定性检查，再用 QA Agent 做路径检查。"""
     demo = state.get("demo_artifact") or {}
-    task = (
-        "请执行功能门检查：关键路径完整性、返回关系、状态一致性、控制台报错。\n"
-        f"Demo: {json.dumps(demo, ensure_ascii=False)}\n\n"
-        '只输出 JSON: {"pass": bool, "issues": ["问题1", ...]}'
-    )
+    artifact_path = str(demo.get("artifact_path") or "")
+    evidence_bits: list[str] = []
+    issue_texts: list[str] = []
+    passed = True
 
-    gate: dict = {"pass": True, "issues": []}
+    if not artifact_path:
+        passed = False
+        issue_texts.append("Demo 产物路径缺失")
+    else:
+        path = Path(artifact_path)
+        if not path.exists():
+            passed = False
+            issue_texts.append(f"Demo 产物文件不存在: {artifact_path}")
+        else:
+            evidence_bits.append(f"artifact_exists={artifact_path}")
+
+    audit = state.get("design_audit") or {}
+    if audit and not audit.get("approved"):
+        passed = False
+        issue_texts.append("设计 GUARD 未批准，功能门拒绝放行")
+        evidence_bits.append(json.dumps(audit.get("issues") or [], ensure_ascii=False))
+
+    llm_gate: dict = {}
     try:
-        from codepilot.core.agent_loader import invoke_agent
-
-        response = invoke_agent("qa", task)
-        parsed = _parse_json(safe_content(response))
-        if parsed:
-            gate = parsed
+        response = invoke_agent(
+            "qa",
+            (
+                "请执行功能门检查：关键路径完整性、返回关系、状态一致性。"
+                "必须引用 Demo 路径，禁止在没有证据时输出 pass=true。\n"
+                f"Demo: {json.dumps(demo, ensure_ascii=False)}\n\n"
+                '只输出 JSON: {"pass": bool, "issues": ["问题1"]}'
+            ),
+        )
+        llm_gate = _parse_json(safe_content(response))
+        if llm_gate.get("pass") is False:
+            passed = False
+        for text in llm_gate.get("issues") or []:
+            issue_texts.append(str(text))
     except Exception:  # noqa: BLE001
-        logger.exception("function_gate: failed via LLM")
+        logger.exception("function_gate: QA agent failed")
+        passed = False
+        issue_texts.append("功能门 QA Agent 执行失败")
 
-    issues: list[IssueEntry] = []
-    for issue_text in gate.get("issues", []):
-        issues.append({"risk": "high", "fix": str(issue_text), "status": "open"})
+    evidence = "; ".join(evidence_bits) or artifact_path or "no_artifact"
+    if passed:
+        issues = resolve_issues(state.get("issues_ledger") or [], source="function_gate")
+    else:
+        issues = _issues_from_texts("function_gate", issue_texts, risk="high", evidence=evidence)
 
+    gate = {"pass": passed, "issues": issue_texts, "evidence": evidence, **{k: v for k, v in llm_gate.items() if k not in {"pass", "issues"}}}
     return {
         "function_gate": gate,
         "review_issues": issues,
-        "checkpoints": ["FUNCTION_GATE"],
+        "issues_ledger": issues,
+        "checkpoints": ["FUNCTION_GATE_PASS" if passed else "FUNCTION_GATE_FAIL"],
     }
 
 
 def visual_gate(state: WorkflowState) -> dict:
-    """视觉门 — 截图对比与设计规范审核。
-
-    复用 ``screenshot_diff`` 工具对比设计稿与实际产物截图。
-
-    Args:
-        state: 当前的工作流状态。
-
-    Returns:
-        包含 ``visual_gate`` 结果和新增问题的字典。
-    """
+    """视觉门 — 占位图不得视为通过；真实 HTML/浏览器对比按相似度判定。"""
     demo = state.get("demo_artifact") or {}
-    artifact_path = demo.get("artifact_path", "")
-    reference_path = artifact_path.replace("build.zip", "design.png") if artifact_path else ""
-    actual_path = artifact_path.replace("build.zip", "screenshot.png") if artifact_path else ""
+    existing = state.get("visual_compare") or {}
+    artifact_path = str(demo.get("artifact_path") or "")
 
-    compare_result: dict = {"pass": True, "similarity": 1.0, "issues": []}
-    try:
-        result = screenshot_diff.invoke(
-            {
-                "reference_path": reference_path,
-                "actual_path": actual_path,
-                "threshold": 0.95,
-            }
+    if existing.get("mode") == "placeholder" or (
+        existing.get("unverified") and existing.get("mode") not in {"browser", "html_raster"}
+    ):
+        message = "视觉对比使用占位图，未验证真实还原"
+        issues = [
+            make_issue(
+                source="visual_gate",
+                message=message,
+                risk="medium",
+                evidence=json.dumps(existing, ensure_ascii=False),
+            )
+        ]
+        gate = {**existing, "pass": False, "unverified": True, "issues": [message]}
+        return {
+            "visual_gate": gate,
+            "review_issues": issues,
+            "issues_ledger": issues,
+            "checkpoints": ["VISUAL_GATE_UNVERIFIED"],
+        }
+
+    compare_result: dict = {"pass": False, "similarity": 0.0, "issues": []}
+    if existing.get("mode") in {"browser", "html_raster"}:
+        compare_result = {
+            "pass": bool(existing.get("pass", False)),
+            "similarity": existing.get("similarity", 0.0),
+            "diff_image_path": existing.get("diff_image_path"),
+            "mode": existing.get("mode"),
+            "unverified": False,
+            "issues": []
+            if existing.get("pass")
+            else [f"视觉还原相似度 {existing.get('similarity', 0.0)} 低于阈值"],
+        }
+    else:
+        reference_path = artifact_path.replace("build.zip", "design.png") if artifact_path else ""
+        actual_path = artifact_path.replace("build.zip", "screenshot.png") if artifact_path else ""
+        try:
+            result = screenshot_diff.invoke(
+                {
+                    "reference_path": reference_path,
+                    "actual_path": actual_path,
+                    "threshold": 0.95,
+                }
+            )
+            compare_result["pass"] = bool(result.get("pass", False))
+            compare_result["similarity"] = result.get("similarity", 0.0)
+            compare_result["diff_image_path"] = result.get("diff_image_path")
+            compare_result["mode"] = "file"
+            compare_result["unverified"] = False
+            if not compare_result["pass"]:
+                compare_result["issues"] = [
+                    f"视觉还原相似度 {compare_result['similarity']} 低于阈值"
+                ]
+        except Exception:  # noqa: BLE001
+            logger.exception("visual_gate: screenshot_diff failed")
+            compare_result["issues"] = ["截图对比工具执行失败"]
+
+    if compare_result["pass"]:
+        issues = resolve_issues(state.get("issues_ledger") or [], source="visual_gate")
+    else:
+        issues = _issues_from_texts(
+            "visual_gate",
+            compare_result.get("issues") or [],
+            risk="medium",
+            evidence=json.dumps(compare_result, ensure_ascii=False),
         )
-        compare_result["pass"] = result.get("pass", False)
-        compare_result["similarity"] = result.get("similarity", 0.0)
-        if not compare_result["pass"]:
-            compare_result["issues"] = [f"视觉还原相似度 {compare_result['similarity']} 低于阈值"]
-    except Exception:  # noqa: BLE001
-        logger.exception("visual_gate: screenshot_diff failed")
-        compare_result["pass"] = False
-        compare_result["issues"] = ["截图对比工具执行失败"]
-
-    issues: list[IssueEntry] = []
-    for issue_text in compare_result.get("issues", []):
-        issues.append({"risk": "medium", "fix": str(issue_text), "status": "open"})
-
     return {
         "visual_gate": compare_result,
         "review_issues": issues,
-        "checkpoints": ["VISUAL_GATE"],
+        "issues_ledger": issues,
+        "checkpoints": ["VISUAL_GATE_PASS" if compare_result["pass"] else "VISUAL_GATE_FAIL"],
     }
 
 
 def rehearsal_gate(state: WorkflowState) -> dict:
-    """演示门 — 完整彩排与兜底方案验证。
-
-    由于演示门涉及人工 Review，此处使用 LLM 模拟彩排检查，并标记
-    ``rehearsal_pass``。在真实场景中应通过 ``interrupt`` 暂停等待人工确认。
-
-    Args:
-        state: 当前的工作流状态。
-
-    Returns:
-        包含 ``rehearsal_gate`` 结果和新增问题的字典。
-    """
+    """演示门 — interrupt 等待人工彩排确认。"""
     demo = state.get("demo_artifact") or {}
-    task = (
-        "请执行演示门检查：完整彩排、设备/网络/兜底方案验证。\n"
-        f"Demo: {json.dumps(demo, ensure_ascii=False)}\n\n"
-        '只输出 JSON: {"pass": bool, "issues": ["问题1", ...]}'
+    function_pass = bool((state.get("function_gate") or {}).get("pass"))
+    visual = state.get("visual_gate") or {}
+
+    decision = interrupt(
+        {
+            "reason": "rehearsal_gate",
+            "demo_artifact": demo,
+            "function_gate": state.get("function_gate"),
+            "visual_gate": visual,
+            "issues_ledger": state.get("issues_ledger", []),
+            "prompt": (
+                "请完成演示门彩排（设备/网络/兜底）。"
+                "通过 Command(resume={'approved': true|false, 'comment': '...'} ) 恢复。"
+            ),
+        }
     )
 
-    gate: dict = {"pass": True, "issues": []}
-    try:
-        from codepilot.core.agent_loader import invoke_agent
+    approved = False
+    comment = ""
+    if isinstance(decision, dict):
+        approved = bool(decision.get("approved", False))
+        comment = str(decision.get("comment") or "")
+    else:
+        approved = bool(decision)
 
-        response = invoke_agent("qa", task)
-        parsed = _parse_json(safe_content(response))
-        if parsed:
-            gate = parsed
-    except Exception:  # noqa: BLE001
-        logger.exception("rehearsal_gate: failed via LLM")
+    # 功能门未过时，即使人工想放行也不把演示门记为通过。
+    passed = approved and function_pass
+    evidence = json.dumps(
+        {"approved": approved, "comment": comment, "function_pass": function_pass},
+        ensure_ascii=False,
+    )
+    if passed:
+        issues = resolve_issues(state.get("issues_ledger") or [], source="rehearsal_gate")
+        issue_texts: list[str] = []
+    else:
+        issue_texts = [comment or "演示门未通过人工彩排"]
+        if not function_pass:
+            issue_texts.append("功能门未通过，演示门不得放行")
+        issues = _issues_from_texts(
+            "rehearsal_gate",
+            issue_texts,
+            risk="high",
+            evidence=evidence,
+        )
 
-    issues: list[IssueEntry] = []
-    for issue_text in gate.get("issues", []):
-        issues.append({"risk": "high", "fix": str(issue_text), "status": "open"})
-
+    gate = {"pass": passed, "approved": approved, "comment": comment, "issues": issue_texts}
     return {
         "rehearsal_gate": gate,
         "review_issues": issues,
-        "checkpoints": ["REHEARSAL_GATE"],
+        "issues_ledger": issues,
+        "checkpoints": ["REHEARSAL_GATE_PASS" if passed else "REHEARSAL_GATE_FAIL"],
     }
 
 
@@ -253,100 +337,92 @@ def rehearsal_gate(state: WorkflowState) -> dict:
 
 
 def fix_agent(state: WorkflowState) -> dict:
-    """证据驱动修复节点 — 根据 issues_ledger 中的问题进行修复。
+    """证据驱动修复：针对未解决问题改产物，并把问题标为 processing。"""
+    round_count = int(state.get("review_round") or 0) + 1
+    issues = list(state.get("issues_ledger") or [])
+    open_issues = [issue for issue in issues if issue.get("status") != "resolved"]
 
-    修复后回到功能门重新走完整串联，避免修复引入回归问题。
+    demo = dict(state.get("demo_artifact") or {})
+    fix_notes = list(demo.get("fix_notes") or [])
+    try:
+        response = invoke_agent(
+            "qa",
+            (
+                "请基于下列问题与证据驱动下一轮修复。不要宣称已通过门禁。"
+                "输出 JSON: {\"fix_notes\": [\"改动1\"], \"resolved_ids\": []}。\n"
+                f"{format_state_context(state, 'qa')}\n"
+                f"open_issues: {json.dumps(open_issues, ensure_ascii=False)}"
+            ),
+        )
+        parsed = _parse_json(safe_content(response))
+        for note in parsed.get("fix_notes") or []:
+            fix_notes.append(str(note))
+    except Exception:  # noqa: BLE001
+        logger.exception("fix_agent: QA agent failed")
+        fix_notes.append(f"round {round_count}: 自动修复调用失败，保留问题等待重跑门禁")
 
-    Args:
-        state: 当前的工作流状态。
+    demo["fix_notes"] = fix_notes
+    demo["version"] = f"fix-round-{round_count}"
 
-    Returns:
-        包含更新后的 ``review_round`` 和问题状态标记的字典。
-    """
-    round_count = state.get("review_round", 0) + 1
-    issues = state.get("issues_ledger") or []
-
-    # 将本轮待修复的问题标记为 processing
-    updated_issues: list[IssueEntry] = []
-    for issue in issues:
-        if issue.get("status") == "open":
-            updated_issues.append({**issue, "status": "processing"})
-        else:
-            updated_issues.append(issue)
-
-    logger.info("fix_agent: round %d, processing %d open issues", round_count, len(updated_issues))
-
+    updated = [
+        {**issue, "status": "processing"}
+        for issue in open_issues
+        if issue.get("id")
+    ]
+    logger.info("fix_agent: round %d, processing %d open issues", round_count, len(updated))
     return {
         "review_round": round_count,
-        "issues_ledger": updated_issues,
+        "demo_artifact": demo,
+        "issues_ledger": updated,
         "checkpoints": [f"FIX_ROUND_{round_count}"],
     }
 
 
 def loop_condition(state: WorkflowState) -> str:
-    """判定三道门禁后是否仍有高风险问题需要修复。
-
-    根据 ``issues_ledger`` 中是否存在未解决的高风险问题决定路由：
-    - ``fix``: 存在高风险未解决问题，进入 ``fix_agent`` 修复回环；
-    - ``done``: 无高风险问题，完成评审，进入 ``human_confirm``。
-
-    当 ``review_round`` 达到上限时强制结束，保证循环收敛。
-
-    Args:
-        state: 当前的工作流状态。
-
-    Returns:
-        ``"fix"`` 或 ``"done"``。
-    """
-    round_count = state.get("review_round", 0)
+    """判定三道门禁后是否仍有高风险问题需要修复。"""
+    round_count = int(state.get("review_round") or 0)
     if round_count >= _MAX_FIX_ROUNDS:
-        logger.warning(
-            "loop_condition: max fix rounds (%d) reached, force-done", _MAX_FIX_ROUNDS
-        )
+        logger.warning("loop_condition: max fix rounds (%d) reached, force-done", _MAX_FIX_ROUNDS)
         return "done"
 
     issues = state.get("issues_ledger") or []
-    has_high_risk = any(
-        issue.get("risk") == "high" and issue.get("status") != "resolved"
-        for issue in issues
-    )
-    return "fix" if has_high_risk else "done"
+    return "fix" if _open_high_risk(issues) else "done"
 
 
 def finalize_review(state: WorkflowState) -> dict:
-    """汇总三道门禁结果，生成最终的 ``qa_report``。
-
-    在 ``loop_condition`` 判定为 ``done`` 后执行，将功能门、视觉门、
-    演示门的结果合并为 ``QAReport``，并将已处理的问题标记为 resolved。
-
-    Args:
-        state: 当前的工作流状态。
-
-    Returns:
-        包含 ``qa_report`` 和更新后 ``issues_ledger`` 的字典。
-    """
+    """汇总三道门禁结果。不把未修复问题标为 resolved。"""
     func_gate = state.get("function_gate") or {}
     vis_gate = state.get("visual_gate") or {}
     reh_gate = state.get("rehearsal_gate") or {}
 
     function_pass = bool(func_gate.get("pass", False))
-    visual_pass = bool(vis_gate.get("pass", False))
+    visual_pass = bool(vis_gate.get("pass", False)) and not vis_gate.get("unverified")
     rehearsal_pass = bool(reh_gate.get("pass", False))
 
-    issues = state.get("issues_ledger") or []
-    resolved_issues: list[IssueEntry] = []
-    for issue in issues:
-        resolved_issues.append({**issue, "status": "resolved"})
+    issues = list(state.get("issues_ledger") or [])
+    all_gates_pass = function_pass and visual_pass and rehearsal_pass
+    no_high_risk = not _open_high_risk(issues)
 
     qa_report: QAReport = {
         "function_pass": function_pass,
         "visual_pass": visual_pass,
         "rehearsal_pass": rehearsal_pass,
-        "issues": resolved_issues,
+        "issues": issues,
     }
 
+    try:
+        from codepilot.core.memory_store import update_agent_memory
+
+        update_agent_memory(
+            "qa_agent",
+            last_gate_pass=all_gates_pass and no_high_risk,
+            last_issue_count=len(issues),
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("finalize_review: failed to persist agent memory")
+
+    checkpoint = "QA_PASS" if all_gates_pass and no_high_risk else "QA_FAIL"
     return {
         "qa_report": qa_report,
-        "issues_ledger": resolved_issues,
-        "checkpoints": ["QA_PASS" if all([function_pass, visual_pass, rehearsal_pass]) else "QA_FAIL"],
+        "checkpoints": [checkpoint],
     }

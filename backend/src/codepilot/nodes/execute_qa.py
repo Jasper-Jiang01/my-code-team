@@ -25,8 +25,6 @@ def execute_qa(state: WorkflowState) -> dict:
         logger.warning("execute_qa: demo_artifact not produced yet, proceeding anyway")
 
     return {
-        "review_panel_results": [],
-        "review_issues": [],
         "review_round": 0,
         "function_gate": None,
         "visual_gate": None,

@@ -16,5 +16,8 @@ format:
 test:
 	pytest tests/ -v
 
+eval:
+	pytest tests/test_eval_harness.py -v
+
 run:
 	langgraph dev
