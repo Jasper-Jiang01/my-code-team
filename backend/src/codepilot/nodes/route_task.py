@@ -1,15 +1,15 @@
-"""Route the task to the appropriate subgraph based on classification."""
+"""根据分类结果将任务路由到对应的子图。"""
 
 from codepilot.states.workflow_state import WorkflowState
 
 
 def route_task(state: WorkflowState) -> str:
-    """Return the target node name based on the current next_step.
+    """根据当前 next_step 返回目标节点名称。
 
     Args:
-        state: The current workflow state.
+        state: 当前的工作流状态。
 
     Returns:
-        The target node name for conditional edge routing.
+        用于条件边路由的目标节点名称。
     """
     return state.get("next_step", "research")

@@ -1,3 +1,3 @@
-"""Setup script for initializing the CodePilot backend."""
+"""用于初始化 CodePilot 后端的安装脚本。"""
 
-# TODO: Add database migration, vector store initialization, and agent harness loading
+# TODO: 添加数据库迁移、向量存储初始化以及 Agent Harness 加载逻辑
