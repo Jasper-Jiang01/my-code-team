@@ -1,0 +1,161 @@
+%% ============================================================
+%% CodePilot 多 Agent 动态工作流 —— LangGraph 结构示意图
+%% 对应文档：多Agent动态工作流系统技术方案.md
+%% 对应代码：backend/src/codepilot/{graphs,nodes,states}/、backend/agents/*.yaml
+%% 用法：VSCode/CatPaw Mermaid 预览，或 https://mermaid.live 粘贴查看
+%% ============================================================
+
+flowchart TB
+
+    START([" START "]) --> CLASSIFY
+
+    %% ------------------------------------------------------------
+    %% 主图 MainWorkflowGraph（backend/src/codepilot/graphs/main_workflow.py）
+    %% ------------------------------------------------------------
+    subgraph MAIN["MainWorkflowGraph · 调度中心 (Orchestrator / Supervisor)"]
+        direction TB
+
+        CLASSIFY["node: classify_task\n(LLM 任务分类)"]
+        ROUTE{{"conditional_edge: route_task\nnext_step 路由"}}
+        HUMAN["node: human_confirm\n(interrupt 人工确认)"]
+
+        CLASSIFY --> ROUTE
+    end
+
+    %% StateBus 独立展示，供所有节点/子图读写
+    STATE[("State Bus · WorkflowState\ngoal / scope / constraints / exit_conditions\nfacts_ledger / rules_ledger / issues_ledger\nspec / evidence / demo_artifact / qa_report\ncheckpoints / next_step / human_confirm")]
+
+    MAIN <-.读写.-> STATE
+
+    %% ------------------------------------------------------------
+    %% 子图 1：ProblemDiscoveryGraph（问题发现，阶段1-2）
+    %% ------------------------------------------------------------
+    ROUTE -- "research" --> PD
+
+    subgraph PD["ProblemDiscoveryGraph · 研究组 (Research Team)\n[阶段1 命题解读 · 阶段2 内外研究]"]
+        direction TB
+        PD_AGENT["Agent: research\n(agents/research.yaml)"]
+        PD_NODE["node: execute_research"]
+        PD_FANOUT["fan_out: Send(researcher, query)\n种子查询发散"]
+        PD_SYN["node: synthesize_results\n关键词网络 / 向量检索收口"]
+
+        PD_NODE --> PD_AGENT
+        PD_AGENT --> PD_FANOUT
+        PD_FANOUT --> PD_SYN
+    end
+
+    PD_TOOLS[("Tools/Skills\nsearch_km · vector_memory")]
+    PD -.调用.-> PD_TOOLS
+    PD <-.facts_ledger.-> STATE
+
+    %% ------------------------------------------------------------
+    %% 子图 2：DecisionGraph（决策，阶段3-4）
+    %% ------------------------------------------------------------
+    ROUTE -- "data" --> DEC
+    PD --> DEC
+
+    subgraph DEC["DecisionGraph · 数据组 + 红军组 (Data & Red Team)\n[阶段3 数据测算 · 阶段4 指标与方案]"]
+        direction TB
+        DEC_AGENT["Agent: data\n(agents/data.yaml)"]
+        DEC_NODE["node: execute_data"]
+        DEC_PRODUCER["producer: 方案生成"]
+        DEC_CRITIC["critic: 红军挑战"]
+        DEC_JUDGE{{"judge: 对抗验证裁决"}}
+
+        DEC_NODE --> DEC_AGENT
+        DEC_AGENT --> DEC_PRODUCER --> DEC_CRITIC --> DEC_JUDGE
+        DEC_JUDGE -- "needs_fix" --> DEC_PRODUCER
+    end
+
+    DEC_TOOLS[("Tools/Skills\nquery_sql (SQLDatabaseToolkit)")]
+    DEC -.调用.-> DEC_TOOLS
+    DEC <-.spec / evidence.-> STATE
+
+    %% ------------------------------------------------------------
+    %% 子图 3：ProductionGraph（生产，阶段5-6，静态六步子流程）
+    %% ------------------------------------------------------------
+    ROUTE -- "produce" --> PROD
+    DEC_JUDGE -- "pass" --> PROD
+
+    subgraph PROD["ProductionGraph · 生产组 (Production Team)\n[阶段5 规格设计 · 阶段6 高保真 Demo]\n静态子流程 · 不可缺步"]
+        direction TB
+        PROD_AGENT["Agent: design\n(agents/design.yaml)"]
+        PROD_NODE["node: execute_produce"]
+        P1["01 需求增量\n(EXPLORE)"]
+        P2["02 设计草稿\n(GENERATE)"]
+        P3["03 DP 审核\n(GUARD)"]
+        P4["04 开发实现\n(BUILD)"]
+        P5["05 视觉还原\n(COMPARE)"]
+        P6["06 QA 验收\n(VERIFY)"]
+
+        PROD_NODE --> PROD_AGENT --> P1 --> P2 --> P3 --> P4 --> P5 --> P6
+    end
+
+    PROD_TOOLS[("Tools/Skills\ndeploy_demo · screenshot_diff · MCP/PythonREPL")]
+    PROD -.调用.-> PROD_TOOLS
+    PROD <-.demo_artifact.-> STATE
+
+    %% ------------------------------------------------------------
+    %% 子图 4：ReviewGraph（评审，阶段7-9，红蓝对抗+质检+答辩）
+    %% ------------------------------------------------------------
+    ROUTE -- "qa" --> REV
+    P6 --> REV
+
+    subgraph REV["ReviewGraph · 质检组 + 五岗位评委 (QA & Review Panels)\n[阶段7 红蓝对抗 · 阶段8 质检 · 阶段9 答辩]"]
+        direction TB
+        REV_AGENT["Agent: qa\n(agents/qa.yaml)"]
+        REV_NODE["node: execute_qa / execute_review"]
+
+        subgraph PANELS["五岗位评委视角 (review_panels/*.yaml)"]
+            direction LR
+            RP1["platform\n平台视角"]
+            RP2["assets\n资产视角"]
+            RP3["user_poi\n用户/商户视角"]
+            RP4["merchant\n商户视角"]
+            RP5["city_supply\n城市供给视角"]
+        end
+
+        GATE_FUNC{{"功能门\nassert 规则引擎"}}
+        GATE_VISUAL{{"视觉门\n截图 Diff"}}
+        GATE_DEMO{{"演示门\ninterrupt 人工彩排"}}
+        LOOP{{"loop_condition:\nissues_ledger 高风险?"}}
+
+        REV_NODE --> REV_AGENT --> PANELS --> GATE_FUNC --> GATE_VISUAL --> GATE_DEMO --> LOOP
+        LOOP -- "fix" --> FIX["fix_agent\n证据驱动修复"]
+        FIX --> GATE_FUNC
+    end
+
+    REV <-.issues_ledger / qa_report.-> STATE
+
+    LOOP -- "done" --> HUMAN
+    HUMAN -- "Command(resume=...)" --> END_NODE([" END "])
+    HUMAN -.高风险节点暂停.-> STATE
+
+    %% ------------------------------------------------------------
+    %% 记忆系统（贯穿全流程）
+    %% ------------------------------------------------------------
+    MEM_PROJECT[("Project Memory\nmemory/project_memory.json\n向量数据库 Chroma/Pinecone")]
+    MEM_AGENT[("Agent Memory (分域)\nmemory/agent_memory/*")]
+    CKPT[("Checkpoints\ncheckpoints/\nMemorySaver / PostgresSaver")]
+
+    MEM_PROJECT -.跨项目复用.-> PD
+    MEM_AGENT -.领域记忆隔离.-> PD & DEC & PROD & REV
+    STATE -.checkpoint 回写.-> CKPT
+    CKPT -.断点续跑.-> MAIN
+
+    %% ------------------------------------------------------------
+    %% 样式
+    %% ------------------------------------------------------------
+    classDef graphStyle fill:#eef2ff,stroke:#4f46e5,stroke-width:1.5px
+    classDef nodeStyle fill:#ffffff,stroke:#6366f1,stroke-width:1px
+    classDef agentStyle fill:#fef3c7,stroke:#d97706,stroke-width:1.5px
+    classDef gateStyle fill:#fee2e2,stroke:#dc2626,stroke-width:1.5px
+    classDef toolStyle fill:#ecfdf5,stroke:#059669,stroke-width:1px
+    classDef stateStyle fill:#f5f3ff,stroke:#7c3aed,stroke-width:2px
+
+    class MAIN,PD,DEC,PROD,REV,PANELS graphStyle
+    class CLASSIFY,ROUTE,PD_NODE,PD_FANOUT,PD_SYN,DEC_NODE,DEC_PRODUCER,DEC_CRITIC,DEC_JUDGE,PROD_NODE,P1,P2,P3,P4,P5,P6,REV_NODE,LOOP,FIX,HUMAN nodeStyle
+    class PD_AGENT,DEC_AGENT,PROD_AGENT,REV_AGENT,RP1,RP2,RP3,RP4,RP5 agentStyle
+    class GATE_FUNC,GATE_VISUAL,GATE_DEMO gateStyle
+    class PD_TOOLS,DEC_TOOLS,PROD_TOOLS,MEM_PROJECT,MEM_AGENT,CKPT toolStyle
+    class STATE stateStyle

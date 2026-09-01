@@ -1,0 +1,583 @@
+// ==========================================================================
+// CodePilot 前端样式（Sass）—— DeepSeek 风格浅色主题 + 响应式适配
+// ==========================================================================
+
+// ---------- 变量 ----------
+$brand: #3964ff;
+$brand-hover: #2f52e0;
+$brand-light: #eef1ff;
+
+$bg-app: #ffffff;
+$bg-sidebar: #f7f7f8;
+$bg-hover: #ececec;
+$bg-input: #f4f4f6;
+$bg-bubble-user: #f0f2f5;
+
+$text-primary: #1a1a1e;
+$text-secondary: #5c5c66;
+$text-tertiary: #9494a1;
+
+$border: #ececed;
+$border-strong: #e2e2e5;
+
+$radius-lg: 1rem; // 16px
+$radius-md: 0.75rem; // 12px
+$radius-full: 4096px;
+
+$shadow-input: 0 0.25rem 1.375rem rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.04);
+
+$font-family: 'Inter', 'PingFang SC', 'Helvetica Neue', system-ui, -apple-system, 'Segoe UI',
+  sans-serif;
+
+// 根字号：整体页面缩放基准，所有 rem 单位都基于此值（1rem = 该值）
+// 默认浏览器根字号为 16px，这里分级提升，桌面/大屏进一步放大，使页面元素更醒目
+$root-font-size: 30px; // 常规桌面：放大 25%
+$root-font-size-large: 30px; // 大屏（≥1440px）：放大 37.5%
+
+// 侧边栏宽度（随断点变化）
+$sidebar-width: 16.25rem; // 260px
+$sidebar-width-compact: 13.75rem; // 220px
+
+// 内容区最大宽度：大屏更宽敞，避免"看起来太小"
+$content-max-width: clamp(51.25rem, 68vw, 68.75rem); // 820px ~ 1100px
+
+// 响应式断点（断点仍用 px，不受根字号缩放影响，保证断点行为稳定）
+$bp-desktop: 1440px;
+$bp-tablet: 1024px;
+$bp-mobile: 768px;
+$bp-small: 480px;
+
+// ---------- Mixin ----------
+@mixin flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@mixin scrollbar-thin {
+  &::-webkit-scrollbar { width: 6px; height: 6px; }
+  &::-webkit-scrollbar-thumb { background: transparent; border-radius: 999px; }
+  &:hover::-webkit-scrollbar-thumb { background: #d6d6da; }
+}
+
+// ---------- 全局基础 ----------
+:root {
+  font-family: $font-family;
+}
+
+* { box-sizing: border-box; }
+html {
+  height: 100%;
+  // 根字号：页面内所有 rem 单位元素（字号、间距、圆角、图标尺寸等）都跟随此值整体等比放大
+  font-size: $root-font-size;
+
+  // 大屏进一步放大，避免宽屏下元素显得过小
+  @media (min-width: $bp-desktop) {
+    font-size: $root-font-size-large;
+  }
+
+  @media (max-width: $bp-mobile) {
+    // 移动端适当回落，避免元素在小屏幕上过大挤压布局
+    font-size: 17px;
+  }
+}
+body, #root { height: 100%; margin: 0; }
+body {
+  background: $bg-app;
+  color: $text-primary;
+  -webkit-font-smoothing: antialiased;
+  font-size: 1rem;
+}
+
+::selection { background: $brand-light; color: $brand; }
+
+// 滚动条：细、悬浮时才明显（合并进上方 html 规则，避免重复选择器）
+html { @include scrollbar-thin; }
+
+button { font-family: inherit; }
+
+// ---------- 整体布局：侧边栏 + 主内容 ----------
+.app-shell {
+  display: flex;
+  height: 100%;
+  background: $bg-app;
+  position: relative;
+}
+
+// ---------- 侧边栏 ----------
+.sidebar {
+  width: $sidebar-width;
+  flex-shrink: 0;
+  background: $bg-sidebar;
+  border-right: 1px solid $border;
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem; // 12px
+  transition: transform 0.2s ease, width 0.2s ease;
+
+  @media (max-width: $bp-tablet) {
+    width: $sidebar-width-compact;
+  }
+
+  @media (max-width: $bp-mobile) {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 17.5rem; // 280px
+    max-width: 80vw;
+    z-index: 100;
+    box-shadow: 0.125rem 0 1rem rgba(0, 0, 0, 0.12);
+    transform: translateX(-100%);
+
+    &.open {
+      transform: translateX(0);
+    }
+  }
+
+  &-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem; // 8px
+    padding: 0.5rem 0.375rem 1rem; // 8px 6px 16px
+
+    .logo-mark {
+      width: 1.625rem; // 26px
+      height: 1.625rem;
+      border-radius: 0.5rem; // 8px
+      background: $brand;
+      @include flex-center;
+      color: #fff;
+      font-size: 0.8125rem; // 13px
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .logo-text {
+      font-size: 0.9375rem; // 15px
+      font-weight: 600;
+      letter-spacing: 0.2px;
+    }
+  }
+
+  &-section-label {
+    margin: 1.25rem 0.5rem 0.375rem; // 20px 8px 6px
+    font-size: 0.75rem; // 12px
+    color: $text-tertiary;
+    font-weight: 500;
+  }
+
+  &-footer {
+    border-top: 1px solid $border;
+    padding-top: 0.625rem; // 10px
+    display: flex;
+    align-items: center;
+    gap: 0.625rem; // 10px
+    padding-left: 0.375rem; // 6px
+
+    .avatar-sm {
+      width: 1.75rem; // 28px
+      height: 1.75rem;
+      border-radius: 50%;
+      background: #d9d9de;
+      @include flex-center;
+      font-size: 0.75rem; // 12px
+      color: $text-secondary;
+      flex-shrink: 0;
+    }
+
+    .footer-text {
+      font-size: 0.8125rem; // 13px
+      color: $text-secondary;
+    }
+  }
+}
+
+// 移动端侧边栏遮罩层
+.sidebar-backdrop {
+  display: none;
+
+  @media (max-width: $bp-mobile) {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 90;
+  }
+}
+
+.btn-new-chat {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem; // 8px
+  width: 100%;
+  padding: 0.625rem 0.75rem; // 10px 12px
+  background: $brand;
+  color: #fff;
+  border-radius: $radius-md;
+  font-size: 0.875rem; // 14px
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+
+  &:hover { background: $brand-hover; }
+
+  .plus { font-size: 1rem; line-height: 1; } // 16px
+}
+
+.session-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem; // 2px
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem; // 8px
+  padding: 0.5625rem 0.625rem; // 9px 10px
+  border-radius: $radius-md;
+  font-size: 0.84375rem; // 13.5px
+  color: $text-secondary;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.12s ease;
+
+  &:hover { background: $bg-hover; }
+
+  &.active {
+    background: $brand-light;
+    color: $brand;
+    font-weight: 500;
+  }
+}
+
+// 移动端顶部菜单按钮（打开侧边栏）
+.btn-menu {
+  display: none;
+  width: 2.125rem; // 34px
+  height: 2.125rem;
+  border-radius: $radius-md;
+  background: transparent;
+  color: $text-primary;
+  @include flex-center;
+  flex-shrink: 0;
+
+  &:hover { background: $bg-hover; }
+
+  @media (max-width: $bp-mobile) {
+    display: flex;
+  }
+}
+
+// ---------- 主内容区 ----------
+.chat-window {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  background: $bg-app;
+}
+
+.chat-header {
+  padding: 1rem 1.5rem; // 16px 24px
+  display: flex;
+  align-items: center;
+  gap: 0.625rem; // 10px
+  flex-shrink: 0;
+
+  @media (max-width: $bp-mobile) {
+    padding: 0.75rem 1rem; // 12px 16px
+  }
+
+  h1 {
+    font-size: 1rem; // 16px
+    font-weight: 600;
+    margin: 0;
+    color: $text-primary;
+  }
+}
+
+.subtitle {
+  color: $text-tertiary;
+  font-size: 0.78125rem; // 12.5px
+
+  @media (max-width: $bp-small) {
+    display: none;
+  }
+}
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem 1.5rem 1.5rem; // 8px 24px 24px
+  display: flex;
+  flex-direction: column;
+  gap: 1.375rem; // 22px
+  max-width: $content-max-width;
+  width: 100%;
+  margin: 0 auto;
+
+  @media (max-width: $bp-mobile) {
+    padding: 0.5rem 1rem 1rem; // 8px 16px 16px
+    gap: 1rem; // 16px
+  }
+}
+
+.empty-hint {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem; // 6px
+  color: $text-secondary;
+  font-size: 0.875rem; // 14px
+  text-align: center;
+  line-height: 2;
+  padding: 0 1rem; // 16px
+
+  .empty-logo {
+    width: 3.25rem; // 52px
+    height: 3.25rem;
+    border-radius: 1rem; // 16px
+    background: $brand;
+    @include flex-center;
+    color: #fff;
+    font-size: 1.5rem; // 24px
+    font-weight: 700;
+    margin-bottom: 0.5rem; // 8px
+  }
+
+  .empty-title {
+    font-size: clamp(1.125rem, 2vw + 0.75rem, 1.375rem); // 18px ~ 22px
+    font-weight: 600;
+    color: $text-primary;
+    margin-bottom: 0.25rem; // 4px
+  }
+
+  .empty-examples {
+    color: $text-tertiary;
+    font-size: 0.84375rem; // 13.5px
+  }
+}
+
+.streaming-hint {
+  color: $text-tertiary;
+  font-size: 0.8125rem; // 13px
+  display: flex;
+  align-items: center;
+  gap: 0.5rem; // 8px
+  padding-left: 2.5rem; // 40px
+
+  .dot-flashing {
+    width: 0.375rem; // 6px
+    height: 0.375rem;
+    border-radius: 50%;
+    background: $brand;
+    animation: dot-flashing 1s infinite linear alternate;
+    position: relative;
+
+    &::before,
+    &::after {
+      content: '';
+      display: inline-block;
+      position: absolute;
+      top: 0;
+      width: 0.375rem; // 6px
+      height: 0.375rem;
+      border-radius: 50%;
+      background: $brand;
+    }
+
+    &::before { left: -0.625rem; animation: dot-flashing 1s infinite alternate; animation-delay: 0s; } // -10px
+    &::after { left: 0.625rem; animation: dot-flashing 1s infinite alternate; animation-delay: 1s; } // 10px
+  }
+}
+
+@keyframes dot-flashing {
+  0% { opacity: 0.2; }
+  50%, 100% { opacity: 1; }
+}
+
+.msg-row {
+  display: flex;
+  gap: 0.75rem; // 12px
+  align-items: flex-start;
+
+  &.msg-user { flex-direction: row-reverse; }
+}
+
+.avatar {
+  flex-shrink: 0;
+  width: 1.75rem; // 28px
+  height: 1.75rem;
+  border-radius: 50%;
+  background: $brand;
+  color: #fff;
+  @include flex-center;
+  font-size: 0.6875rem; // 11px
+  font-weight: 600;
+
+  .msg-user & { background: #d9d9de; color: $text-secondary; }
+}
+
+.bubble {
+  max-width: 78%;
+  border-radius: $radius-lg;
+  padding: 0.25rem 0; // 4px 0
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.90625rem; // 14.5px
+  line-height: 1.75;
+  color: $text-primary;
+
+  @media (max-width: $bp-mobile) {
+    max-width: 88%;
+  }
+
+  .msg-assistant & { padding: 0.125rem 0; } // 2px 0
+
+  .msg-user & {
+    background: $bg-bubble-user;
+    padding: 0.625rem 1rem; // 10px 16px
+    border-radius: $radius-md;
+  }
+}
+
+.tool-trace {
+  margin-bottom: 0.625rem; // 10px
+  font-size: 0.78125rem; // 12.5px
+  color: $text-tertiary;
+  background: $bg-sidebar;
+  border: 1px solid $border;
+  border-radius: 0.625rem; // 10px
+  padding: 0.25rem 0.625rem; // 4px 10px
+
+  summary {
+    cursor: pointer;
+    padding: 0.375rem 0; // 6px 0
+    outline: none;
+  }
+
+  pre {
+    margin: 0.25rem 0 0.5rem; // 4px 0 8px
+    padding: 0.625rem; // 10px
+    background: #ffffff;
+    border: 1px solid $border;
+    border-radius: 0.5rem; // 8px
+    overflow-x: auto;
+    color: $text-secondary;
+  }
+}
+
+.error-banner {
+  max-width: $content-max-width;
+  margin: 0 auto 0.5rem; // 0 auto 8px
+  padding: 0.625rem 1rem; // 10px 16px
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+  border-radius: 0.625rem; // 10px
+  font-size: 0.8125rem; // 13px
+}
+
+// ---------- 输入区：悬浮卡片式，仿 DeepSeek ----------
+.chat-input-wrap {
+  flex-shrink: 0;
+  padding: 0.5rem 1.5rem 1.25rem; // 8px 24px 20px
+
+  @media (max-width: $bp-mobile) {
+    padding: 0.5rem 1rem 1rem; // 8px 16px 16px
+  }
+}
+
+.chat-input {
+  max-width: $content-max-width;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem; // 8px
+  background: $bg-input;
+  border-radius: $radius-lg;
+  padding: 0.625rem 0.625rem 0.625rem 1.125rem; // 10px 10px 10px 18px
+  box-shadow: $shadow-input;
+  border: 1px solid transparent;
+  transition: border-color 0.15s ease;
+
+  &:focus-within { border-color: $brand; }
+
+  textarea {
+    flex: 1;
+    resize: none;
+    background: transparent;
+    color: $text-primary;
+    border: none;
+    padding: 0.5rem 0; // 8px 0
+    font: inherit;
+    font-size: 0.90625rem; // 14.5px
+    outline: none;
+    line-height: 1.6;
+    max-height: 12.5rem; // 200px
+  }
+
+  textarea::placeholder { color: $text-tertiary; }
+}
+
+.chat-input-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+button {
+  border: none;
+  border-radius: $radius-full;
+  cursor: pointer;
+  color: white;
+  transition: background 0.15s ease, opacity 0.15s ease, transform 0.1s ease;
+}
+
+.btn-send {
+  background: $brand;
+  width: 2.125rem; // 34px
+  height: 2.125rem;
+  @include flex-center;
+  font-size: 0.875rem; // 14px
+  flex-shrink: 0;
+
+  &:hover:not(:disabled) { background: $brand-hover; }
+  &:disabled { background: #d6d6da; cursor: not-allowed; }
+  &:active:not(:disabled) { transform: scale(0.94); }
+}
+
+.btn-stop {
+  background: $text-primary;
+  width: 2.125rem; // 34px
+  height: 2.125rem;
+  @include flex-center;
+  flex-shrink: 0;
+
+  &:hover { opacity: 0.85; }
+
+  .stop-icon {
+    width: 0.6875rem; // 11px
+    height: 0.6875rem;
+    background: #fff;
+    border-radius: 0.125rem; // 2px
+  }
+}
+
+.disclaimer {
+  text-align: center;
+  font-size: 0.71875rem; // 11.5px
+  color: $text-tertiary;
+  padding-top: 0.625rem; // 10px
+}
