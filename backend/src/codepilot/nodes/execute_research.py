@@ -4,6 +4,7 @@ import json
 import logging
 
 from codepilot.core.agent_loader import invoke_agent
+from codepilot.core.llm_utils import extract_json, safe_content
 from codepilot.core.memory_store import load_project_memory
 from codepilot.states.workflow_state import WorkflowState
 
@@ -25,13 +26,11 @@ _RESEARCH_TASK_TEMPLATE = """\
 
 
 def _parse_seed_queries(raw_content: str) -> list[str]:
-    try:
-        parsed = json.loads(raw_content)
+    parsed = extract_json(raw_content)
+    if isinstance(parsed, dict):
         queries = parsed.get("seed_queries", [])
         if isinstance(queries, list):
             return [str(q) for q in queries if str(q).strip()][:_MAX_SEED_QUERIES]
-    except (json.JSONDecodeError, AttributeError):
-        logger.warning("execute_research: failed to parse seed_queries from LLM output")
     return []
 
 
@@ -62,8 +61,7 @@ def execute_research(state: WorkflowState) -> dict:
                 max_queries=_MAX_SEED_QUERIES,
             )
             response = invoke_agent("research", task)
-            content = response.content if isinstance(response.content, str) else str(response.content)
-            seed_queries = _parse_seed_queries(content)
+            seed_queries = _parse_seed_queries(safe_content(response))
         except Exception:  # noqa: BLE001 - 不能因为研究规划失败而让图崩溃
             logger.exception("execute_research: failed to derive seed queries via LLM")
 

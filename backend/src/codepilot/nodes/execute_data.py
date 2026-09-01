@@ -4,6 +4,7 @@ import json
 import logging
 
 from codepilot.core.agent_loader import invoke_agent
+from codepilot.core.llm_utils import extract_json, safe_content
 from codepilot.states.workflow_state import RuleEntry, WorkflowState
 
 logger = logging.getLogger(__name__)
@@ -26,13 +27,8 @@ _DATA_TASK_TEMPLATE = """\
 
 
 def _parse_data_result(raw_content: str) -> dict:
-    try:
-        parsed = json.loads(raw_content)
-        if isinstance(parsed, dict):
-            return parsed
-    except json.JSONDecodeError:
-        logger.warning("execute_data: failed to parse LLM output as JSON")
-    return {}
+    parsed = extract_json(raw_content)
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def execute_data(state: WorkflowState) -> dict:
@@ -61,8 +57,7 @@ def execute_data(state: WorkflowState) -> dict:
                 facts=json.dumps(facts, ensure_ascii=False) if facts else "（暂无）",
             )
             response = invoke_agent("data", task)
-            content = response.content if isinstance(response.content, str) else str(response.content)
-            result = _parse_data_result(content)
+            result = _parse_data_result(safe_content(response))
             for rule in result.get("rules", []):
                 if isinstance(rule, dict) and rule.get("domain") and rule.get("content"):
                     rules.append({"domain": str(rule["domain"]), "content": str(rule["content"])})

@@ -9,6 +9,7 @@ import json
 import logging
 
 from codepilot.core.agent_loader import invoke_agent
+from codepilot.core.llm_utils import extract_json, safe_content
 from codepilot.states.workflow_state import WorkflowState
 
 logger = logging.getLogger(__name__)
@@ -37,12 +38,9 @@ _CRITIQUE_SECTION_TEMPLATE = """\
 
 
 def _parse_proposal(raw_content: str) -> dict | None:
-    try:
-        parsed = json.loads(raw_content)
-        if isinstance(parsed, dict) and "goal" in parsed:
-            return parsed
-    except json.JSONDecodeError:
-        logger.warning("producer: failed to parse proposal JSON from LLM output")
+    parsed = extract_json(raw_content)
+    if isinstance(parsed, dict) and "goal" in parsed:
+        return parsed
     return None
 
 
@@ -80,8 +78,7 @@ def producer(state: WorkflowState) -> dict:
             critique_section=critique_section,
         )
         response = invoke_agent("data", task)
-        content = response.content if isinstance(response.content, str) else str(response.content)
-        parsed = _parse_proposal(content)
+        parsed = _parse_proposal(safe_content(response))
         if parsed:
             proposal = parsed
     except Exception:  # noqa: BLE001 - 回退到上面的确定性提案

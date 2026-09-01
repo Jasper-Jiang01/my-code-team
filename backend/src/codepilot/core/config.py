@@ -29,6 +29,8 @@ class Settings(BaseSettings):
 
     # LangSmith
     langsmith_api_key: str = ""
+    langsmith_tracing: bool = False
+    langsmith_project: str = "codepilot"
 
     # 内部工具
     km_search_endpoint: str = ""

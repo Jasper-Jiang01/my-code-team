@@ -11,6 +11,7 @@ import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from codepilot.core.create_model import create_chat_model
+from codepilot.core.llm_utils import extract_json, safe_content
 from codepilot.states.workflow_state import WorkflowState
 
 logger = logging.getLogger(__name__)
@@ -28,12 +29,9 @@ _CRITIC_SYSTEM_PROMPT = """\
 
 
 def _parse_critique(raw_content: str) -> dict:
-    try:
-        parsed = json.loads(raw_content)
-        if isinstance(parsed, dict) and parsed.get("verdict") in ("pass", "needs_fix"):
-            return parsed
-    except json.JSONDecodeError:
-        logger.warning("critic: failed to parse critique JSON from LLM output")
+    parsed = extract_json(raw_content)
+    if isinstance(parsed, dict) and parsed.get("verdict") in ("pass", "needs_fix"):
+        return parsed
     return {"verdict": "pass", "issues": []}
 
 
@@ -75,8 +73,7 @@ def critic(state: WorkflowState) -> dict:
             ),
         ]
         response = model.invoke(messages)
-        content = response.content if isinstance(response.content, str) else str(response.content)
-        critique = _parse_critique(content)
+        critique = _parse_critique(safe_content(response))
     except Exception:  # noqa: BLE001 - 不能因为批评失败而让图崩溃
         logger.exception("critic: failed to evaluate proposal via LLM")
         critique = {"verdict": "pass", "issues": []}

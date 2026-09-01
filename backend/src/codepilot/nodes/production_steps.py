@@ -19,6 +19,7 @@ from pathlib import Path
 
 from codepilot.core.agent_loader import invoke_agent
 from codepilot.core.config import settings
+from codepilot.core.llm_utils import extract_json, safe_content
 from codepilot.states.workflow_state import Demo, WorkflowState
 from codepilot.tools import deploy_demo, screenshot_diff
 
@@ -51,20 +52,11 @@ _DESIGN_TASK_TEMPLATE = """\
 """
 
 
-def _safe_content(response) -> str:
-    """从 LLM 响应中提取文本内容，处理非字符串类型的载荷。"""
-    content = response.content if hasattr(response, "content") else response
-    return content if isinstance(content, str) else str(content)
-
-
 def _parse_json(raw: str, default: dict | None = None) -> dict:
     """尽最大努力解析 JSON，失败时记录日志。"""
-    try:
-        parsed = json.loads(raw)
-        if isinstance(parsed, dict):
-            return parsed
-    except json.JSONDecodeError:
-        logger.warning("production_steps: failed to parse JSON from LLM output")
+    parsed = extract_json(raw)
+    if isinstance(parsed, dict):
+        return parsed
     return dict(default or {})
 
 
@@ -91,7 +83,7 @@ def explore(state: WorkflowState) -> dict:
     result: dict = {}
     try:
         response = invoke_agent("design", extra)
-        result = _parse_json(_safe_content(response))
+        result = _parse_json(safe_content(response))
     except Exception:  # noqa: BLE001 - 不能因单步失败而中断静态子流程
         logger.exception("explore: failed via LLM")
 
@@ -122,7 +114,7 @@ def generate(state: WorkflowState) -> dict:
     )
     try:
         response = invoke_agent("design", extra)
-        parsed = _parse_json(_safe_content(response))
+        parsed = _parse_json(safe_content(response))
         if parsed:
             draft = {**draft, **parsed}
     except Exception:  # noqa: BLE001
@@ -153,7 +145,7 @@ def guard(state: WorkflowState) -> dict:
     audit: dict = {"approved": True, "issues": []}
     try:
         response = invoke_agent("design", extra)
-        parsed = _parse_json(_safe_content(response))
+        parsed = _parse_json(safe_content(response))
         if parsed:
             audit = parsed
     except Exception:  # noqa: BLE001

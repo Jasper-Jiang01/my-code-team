@@ -19,6 +19,7 @@ from langgraph.types import Send
 
 from codepilot.core.agent_loader import load_agent_harness
 from codepilot.core.create_model import create_chat_model
+from codepilot.core.llm_utils import extract_json, safe_content
 from codepilot.states.workflow_state import IssueEntry, QAReport, WorkflowState
 from codepilot.tools import screenshot_diff
 
@@ -44,18 +45,10 @@ class PanelInput(TypedDict):
     spec: dict | None
 
 
-def _safe_content(response) -> str:
-    content = response.content if hasattr(response, "content") else response
-    return content if isinstance(content, str) else str(content)
-
-
 def _parse_json(raw: str, default: dict | None = None) -> dict:
-    try:
-        parsed = json.loads(raw)
-        if isinstance(parsed, dict):
-            return parsed
-    except json.JSONDecodeError:
-        logger.warning("review_steps: failed to parse JSON from LLM output")
+    parsed = extract_json(raw)
+    if isinstance(parsed, dict):
+        return parsed
     return dict(default or {})
 
 
@@ -108,7 +101,7 @@ def panel(payload: PanelInput) -> dict:
         model = create_chat_model()
         messages = [SystemMessage(content=harness.system_prompt), HumanMessage(content=task)]
         response = model.invoke(messages)
-        parsed = _parse_json(_safe_content(response))
+        parsed = _parse_json(safe_content(response))
         if parsed:
             result.update(parsed)
     except Exception:  # noqa: BLE001 - 单个评委失败不得中断其他评委的 fan-out 分支
@@ -153,7 +146,7 @@ def function_gate(state: WorkflowState) -> dict:
         from codepilot.core.agent_loader import invoke_agent
 
         response = invoke_agent("qa", task)
-        parsed = _parse_json(_safe_content(response))
+        parsed = _parse_json(safe_content(response))
         if parsed:
             gate = parsed
     except Exception:  # noqa: BLE001
@@ -239,7 +232,7 @@ def rehearsal_gate(state: WorkflowState) -> dict:
         from codepilot.core.agent_loader import invoke_agent
 
         response = invoke_agent("qa", task)
-        parsed = _parse_json(_safe_content(response))
+        parsed = _parse_json(safe_content(response))
         if parsed:
             gate = parsed
     except Exception:  # noqa: BLE001

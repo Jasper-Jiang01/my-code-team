@@ -6,6 +6,7 @@ import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from codepilot.core.create_model import create_chat_model
+from codepilot.core.llm_utils import extract_json, safe_content
 from codepilot.states.workflow_state import WorkflowState
 
 logger = logging.getLogger(__name__)
@@ -76,12 +77,12 @@ def classify_task(state: WorkflowState) -> dict:
             HumanMessage(content=_build_classification_context(state)),
         ]
         response = model.invoke(messages)
-        content = response.content if isinstance(response.content, str) else str(response.content)
-        parsed = json.loads(content)
-        next_step = parsed.get("next_step")
-        if next_step in _VALID_STEPS:
-            return {"next_step": next_step}
-        logger.warning("classify_task: LLM returned invalid next_step=%r, falling back", next_step)
+        parsed = extract_json(safe_content(response))
+        if isinstance(parsed, dict):
+            next_step = parsed.get("next_step")
+            if next_step in _VALID_STEPS:
+                return {"next_step": next_step}
+        logger.warning("classify_task: LLM returned invalid next_step, falling back")
     except Exception:  # noqa: BLE001 - 任何 LLM/解析失败都不应让图崩溃
         logger.exception("classify_task: LLM classification failed, falling back to rule-based logic")
 
