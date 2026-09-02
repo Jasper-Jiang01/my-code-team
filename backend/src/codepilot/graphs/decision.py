@@ -22,9 +22,17 @@ from codepilot.nodes.tournament import (
 )
 from codepilot.states.workflow_state import WorkflowState
 
+_MAX_DECISION_FIX_ROUNDS = 2
+
 
 def _needs_fix(state: WorkflowState) -> str:
-    """根据 critic 的裁决进行路由：回到循环或进入 judge。"""
+    """根据 critic 的裁决进行路由：回到循环或进入 judge。
+
+    当 fix 轮次超过上限时强制进入 judge，防止无限循环。
+    """
+    round_count = int(state.get("decision_round") or 0)
+    if round_count >= _MAX_DECISION_FIX_ROUNDS:
+        return "pass"
     return "fix" if state.get("decision_verdict") == "needs_fix" else "pass"
 
 
@@ -57,7 +65,9 @@ def build_decision_graph() -> CompiledStateGraph:
     builder.add_edge("producer", "critic")
     builder.add_edge("judge", END)
 
-    return builder.compile()
+    # 子图不设置独立 checkpointer，由主图的 checkpointer 统一管理持久化，
+    # 避免 checkpoint 嵌套冲突。
+    return builder.compile(checkpointer=False)
 
 
 graph = build_decision_graph()

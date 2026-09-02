@@ -22,6 +22,11 @@ export function useChat(): UseChatResult {
   const sessionRef = useRef<string | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
 
+  // 流式 token 增量缓冲 + rAF 合并刷新，避免每个 token 都触发
+  // 一次完整的 messages 状态更新导致长会话卡顿。
+  const pendingTokensRef = useRef<string>('');
+  const rafIdRef = useRef<number | null>(null);
+
   const send = useCallback(
     (text: string) => {
       const trimmed = text.trim();
@@ -41,10 +46,26 @@ export function useChat(): UseChatResult {
         setMessages((prev) => prev.map((m) => (m.id === assistantId ? updater(m) : m)));
       };
 
+      // 将 token 增量累加到缓冲，在一帧内合并为一次状态更新
+      const flushTokens = () => {
+        rafIdRef.current = null;
+        const delta = pendingTokensRef.current;
+        pendingTokensRef.current = '';
+        if (delta) {
+          updateAssistant((m) => ({ ...m, content: m.content + delta }));
+        }
+      };
+      const scheduleTokenFlush = () => {
+        if (rafIdRef.current !== null) return;
+        rafIdRef.current = requestAnimationFrame(flushTokens);
+      };
+
       const onEvent = (event: SSEEvent) => {
         switch (event.type) {
           case 'token':
-            updateAssistant((m) => ({ ...m, content: m.content + event.content }));
+            // 先写入缓冲，下一帧统一刷新，避免逐 token setState
+            pendingTokensRef.current += event.content;
+            scheduleTokenFlush();
             break;
           case 'tool_call':
             updateAssistant((m) => ({
@@ -73,13 +94,33 @@ export function useChat(): UseChatResult {
         }
       };
 
-      streamChat({ message: trimmed, session_id: sessionRef.current }, onEvent, controller.signal)
+      streamChat(
+        { message: trimmed, session_id: sessionRef.current },
+        onEvent,
+        controller.signal,
+        // 线程创建/复用后立即保存 session_id，避免用户中断流式
+        // 时丢失会话上下文（此前仅在 done 事件才保存）
+        (threadId) => {
+          sessionRef.current = threadId;
+        },
+      )
         .catch((err: unknown) => {
           if ((err as Error)?.name === 'AbortError') return;
           setError('无法连接 LangGraph，请确认已启动（默认 http://localhost:2024，backend 目录执行 make run）');
           updateAssistant((m) => ({ ...m, content: m.content || '（连接失败）' }));
         })
         .finally(() => {
+          // 取消可能挂起的 rAF，避免 abort 后残留一次空刷新
+          if (rafIdRef.current !== null) {
+            cancelAnimationFrame(rafIdRef.current);
+            rafIdRef.current = null;
+          }
+          // 刷新缓冲区剩余 token
+          if (pendingTokensRef.current) {
+            const delta = pendingTokensRef.current;
+            pendingTokensRef.current = '';
+            updateAssistant((m) => ({ ...m, content: m.content + delta }));
+          }
           setStreaming(false);
           abortRef.current = null;
         });

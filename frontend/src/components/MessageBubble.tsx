@@ -1,7 +1,8 @@
+import { memo } from 'react';
 import type { ChatMessage } from '../types/chat';
 
 /** 单条消息气泡：user 右侧、assistant 左侧；assistant 支持工具轨迹折叠展示。 */
-export function MessageBubble({ message }: { message: ChatMessage }) {
+export const MessageBubble = memo(function MessageBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === 'user';
   return (
     <div className={`msg-row ${isUser ? 'msg-user' : 'msg-assistant'}`}>
@@ -22,4 +23,4 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
       </div>
     </div>
   );
-}
+});

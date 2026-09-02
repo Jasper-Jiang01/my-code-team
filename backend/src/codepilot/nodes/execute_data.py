@@ -57,14 +57,12 @@ def _rows_to_facts(rows: list[dict], goal: str) -> list[FactEntry]:
 def execute_data(state: WorkflowState) -> dict:
     """执行数据分析阶段：先取数，再让 data Agent 解释口径并产出规则。"""
     goal = state.get("goal", "")
-    sql = (
-        "SELECT metric, value, definition FROM metrics "
-        f"WHERE context = '{goal.replace(chr(39), '')[:80]}'"
-    )
 
     sql_rows: list[dict] = []
     try:
-        raw_rows = query_sql.invoke({"sql": sql})
+        # 使用参数化查询，避免 SQL 注入；将参数拼接交给 query_sql 工具内部处理。
+        sql = "SELECT metric, value, definition FROM metrics WHERE context = :context"
+        raw_rows = query_sql.invoke({"sql": sql, "params": {"context": goal[:80]}})
         sql_rows = [row for row in raw_rows if isinstance(row, dict)] if isinstance(raw_rows, list) else []
     except Exception:  # noqa: BLE001
         logger.exception("execute_data: query_sql failed")

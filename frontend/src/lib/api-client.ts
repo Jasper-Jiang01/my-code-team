@@ -40,13 +40,19 @@ async function ensureThread(threadId?: string): Promise<string> {
 
 /**
  * 流式运行主工作流：POST /threads/{id}/runs/stream。
+ *
+ * ``onThreadReady`` 在线程创建/复用后立即回调，使调用方能在流式
+ * 开始前就持久化 session_id，避免用户中断后丢失会话上下文。
  */
 export async function streamChat(
   payload: ChatRequest,
   onEvent: (event: SSEEvent) => void,
   signal?: AbortSignal,
+  onThreadReady?: (threadId: string) => void,
 ): Promise<void> {
   const threadId = await ensureThread(payload.session_id);
+  // 尽早回传 thread_id，避免等待 done 事件才保存
+  onThreadReady?.(threadId);
   const res = await fetch(`${BASE_URL}/threads/${threadId}/runs/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
@@ -133,6 +139,11 @@ function mapUpdates(data: unknown): SSEEvent[] {
     if (node === '__interrupt__') {
       const prompt = interruptPrompt(value);
       events.push({ type: 'token', content: prompt });
+      continue;
+    }
+    // ★ chitchat 短路：将 chitchat_reply 直接作为 token 输出，不走 tool_call
+    if (node === 'chitchat' && isRecord(value) && typeof value.chitchat_reply === 'string') {
+      events.push({ type: 'token', content: value.chitchat_reply });
       continue;
     }
     events.push({ type: 'tool_call', name: node, args: isRecord(value) ? value : {} });

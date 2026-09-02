@@ -66,7 +66,9 @@ def build_review_graph() -> CompiledStateGraph:
     builder.add_edge("fix_agent", "function_gate")
     builder.add_edge("finalize_review", END)
 
-    return builder.compile()
+    # 子图不设置独立 checkpointer，由主图的 checkpointer 统一管理持久化，
+    # 避免 checkpoint 嵌套冲突。
+    return builder.compile(checkpointer=False)
 
 
 # 模块级别的已编译子图实例，用于独立测试／组合到主工作流图中。

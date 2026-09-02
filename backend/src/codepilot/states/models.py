@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, create_model
 class FactEntryModel(BaseModel):
     """事实台账条目（来源 / 口径 / 取值 / 时间）。"""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     id: str = ""
     source: str
@@ -23,7 +23,7 @@ class FactEntryModel(BaseModel):
 
 
 class RuleEntryModel(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     id: str = ""
     domain: str
@@ -33,7 +33,7 @@ class RuleEntryModel(BaseModel):
 class IssueEntryModel(BaseModel):
     """问题台账条目（风险 / 证据 / 修复 / 验收）。"""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     id: str = ""
     source: str = ""
@@ -44,7 +44,7 @@ class IssueEntryModel(BaseModel):
 
 
 class SpecModel(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     goal: str
     scope: str = ""
@@ -52,7 +52,7 @@ class SpecModel(BaseModel):
 
 
 class DemoModel(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     artifact_path: str = ""
     version: str = ""

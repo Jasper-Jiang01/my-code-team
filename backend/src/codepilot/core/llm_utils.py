@@ -13,8 +13,6 @@ logger = logging.getLogger(__name__)
 
 # 匹配 ```json ... ``` 或 ``` ... ``` 代码块
 _CODE_BLOCK_RE = re.compile(r"```(?:json)?\s*\n?(.*?)```", re.DOTALL | re.IGNORECASE)
-# 匹配第一个 { 到最后一个 } 之间的内容
-_JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
 def extract_json(raw: str) -> dict | list | None:
@@ -52,13 +50,34 @@ def extract_json(raw: str) -> dict | list | None:
         except json.JSONDecodeError:
             pass
 
-    # 3. 提取第一个 { ... } 对象
-    obj_match = _JSON_OBJECT_RE.search(raw)
-    if obj_match:
-        try:
-            return json.loads(obj_match.group(0))
-        except json.JSONDecodeError:
-            pass
+    # 3. 提取第一个 { ... } 对象（逐字符匹配括号）
+    start = raw.find("{")
+    if start != -1:
+        depth = 0
+        in_string = False
+        escape = False
+        for i, ch in enumerate(raw[start:], start):
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == '"' and not escape:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(raw[start : i + 1])
+                    except json.JSONDecodeError:
+                        pass
+                    break
 
     # 4. 提取第一个 [ ... ] 数组（逐字符匹配括号）
     start = raw.find("[")

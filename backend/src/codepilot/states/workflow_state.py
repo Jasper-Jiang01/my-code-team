@@ -2,7 +2,7 @@
 
 from typing import Annotated, TypedDict
 
-from codepilot.states.reducers import unique_extend, upsert_by_id
+from codepilot.states.reducers import last_write_wins, unique_extend, upsert_by_id
 
 
 class FactEntry(TypedDict, total=False):
@@ -93,6 +93,15 @@ class WorkflowState(TypedDict):
     checkpoints: Annotated[list[str], unique_extend]
     next_step: str
     human_confirm: bool | None
+    # chitchat 短路节点的回复文本（简单对话直接输出，不走完整流水线）
+    chitchat_reply: str
+
+    # QA / 修复阶段显式回写的重跑目标。当 fix_agent 判定问题属于
+    # “事实缺失”时为 "data"，属于“规格缺陷”时为 "produce"，
+    # 无需重跑时为空字符串。route_after_qa 优先读取此字段，
+    # 避免仅靠 facts_ledger/spec 指纹比较（QA 阶段不回写这两者
+    # 会导致 rerun 分支永远不触发）。
+    qa_reopen_target: str
 
     # 内部工作字段（不属于核心 State Bus 契约的一部分，仅用于
     # 在单个子图运行内在节点之间传递数据）
@@ -103,18 +112,20 @@ class WorkflowState(TypedDict):
     decision_proposal: dict | None
     decision_critique: dict | None
     decision_verdict: str | None
-    decision_round: int
+    decision_round: Annotated[int, last_write_wins]
     decision_candidates: Annotated[list[dict], upsert_by_id]
     decision_shortlist: list[dict]
 
-    # 闭环间 rerun 指纹
+    # 闭环间 rerun 指纹（仅作为兜底信号；QA 阶段主要通过
+    # qa_reopen_target 显式触发重跑，因为 fix_agent 不会回写
+    # facts_ledger / spec，指纹比较在 QA 后无法自然触发）
     last_decided_facts_fp: str
     last_produced_spec_fp: str
-    loop_rerun_count: int
+    loop_rerun_count: Annotated[int, last_write_wins]
 
     # ProductionGraph 静态六步子流程的工作字段
-    production_step: int
-    production_guard_round: int
+    production_step: Annotated[int, last_write_wins]
+    production_guard_round: Annotated[int, last_write_wins]
     design_draft: dict | None
     design_audit: dict | None
     build_artifact: dict | None
@@ -123,7 +134,7 @@ class WorkflowState(TypedDict):
     # ReviewGraph 对抗式评审的工作字段
     review_panel_results: Annotated[list[dict], upsert_by_id]
     review_issues: Annotated[list[IssueEntry], upsert_by_id]
-    review_round: int
+    review_round: Annotated[int, last_write_wins]
     function_gate: dict | None
     visual_gate: dict | None
     rehearsal_gate: dict | None

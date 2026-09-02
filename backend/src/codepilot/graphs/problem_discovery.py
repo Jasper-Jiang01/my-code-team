@@ -17,6 +17,9 @@ from langgraph.types import Send
 from codepilot.nodes import execute_research, researcher, synthesize_results
 from codepilot.states.workflow_state import WorkflowState
 
+# 并行 researcher 任务上限，防止 fan-out 爆炸
+_MAX_PARALLEL_RESEARCHERS = 5
+
 
 def _fan_out(state: WorkflowState) -> list[Send] | str:
     """为每个种子查询分发一个 ``researcher`` 任务以并行执行。
@@ -28,7 +31,15 @@ def _fan_out(state: WorkflowState) -> list[Send] | str:
     queries = state.get("research_queries") or []
     if not queries:
         return "synthesize"
-    return [Send("researcher", {"query": query}) for query in queries]
+    # 限制并行任务数量，超出上限的截断
+    capped = queries[:_MAX_PARALLEL_RESEARCHERS]
+    if len(queries) > _MAX_PARALLEL_RESEARCHERS:
+        import logging
+        logging.getLogger(__name__).warning(
+            "_fan_out: capped parallel researchers from %d to %d",
+            len(queries), _MAX_PARALLEL_RESEARCHERS,
+        )
+    return [Send("researcher", {"query": query}) for query in capped]
 
 
 def build_problem_discovery_graph() -> CompiledStateGraph:
@@ -52,7 +63,9 @@ def build_problem_discovery_graph() -> CompiledStateGraph:
     builder.add_edge("researcher", "synthesize")
     builder.add_edge("synthesize", END)
 
-    return builder.compile()
+    # 子图不设置独立 checkpointer，由主图的 checkpointer 统一管理持久化，
+    # 避免 checkpoint 嵌套冲突。
+    return builder.compile(checkpointer=False)
 
 
 # 模块级别的已编译子图实例，用于独立测试／组合到主工作流图中。

@@ -30,6 +30,14 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_ARTIFACTS_DIR = str(Path.home() / "Desktop" / "CodePilot_artifacts")
 
+# 静态六步子流程的步骤编号常量
+_STEP_EXPLORE = 1
+_STEP_GENERATE = 2
+_STEP_GUARD = 3
+_STEP_BUILD = 4
+_STEP_COMPARE = 5
+_STEP_VERIFY = 6
+
 
 def _artifact_dir(goal: str) -> Path:
     """返回本次运行的产物落盘目录（位于 ``settings.artifacts_dir`` 下）。
@@ -102,7 +110,7 @@ def explore(state: WorkflowState) -> dict:
     except Exception:  # noqa: BLE001 - 不能因单步失败而中断静态子流程
         logger.exception("explore: failed via LLM")
 
-    return {"production_step": 1, "design_draft": result, "checkpoints": ["EXPLORE_DONE"]}
+    return {"production_step": _STEP_EXPLORE, "design_draft": result, "checkpoints": ["EXPLORE_DONE"]}
 
 
 # -- 02 GENERATE: 设计草稿 -------------------------------------------------
@@ -132,7 +140,7 @@ def generate(state: WorkflowState) -> dict:
         logger.exception("generate: failed via LLM")
 
     _export_design_html(_artifact_dir(state.get("goal", "demo")), state.get("goal", "demo"), draft)
-    return {"production_step": 2, "design_draft": draft, "checkpoints": ["GENERATE_DONE"]}
+    return {"production_step": _STEP_GENERATE, "design_draft": draft, "checkpoints": ["GENERATE_DONE"]}
 
 
 # -- 03 GUARD: DP 审核 -----------------------------------------------------
@@ -140,11 +148,15 @@ def generate(state: WorkflowState) -> dict:
 
 def guard(state: WorkflowState) -> dict:
     """03 GUARD — 由独立审核 Agent 做设计规范审核，失败默认不放行。"""
+    # 截断过大的 design_draft JSON，避免 prompt 过长导致 LLM 响应缓慢或挂起
+    draft_json = json.dumps(state.get("design_draft") or {}, ensure_ascii=False)
+    if len(draft_json) > 4000:
+        draft_json = draft_json[:4000] + "\n...（已截断）"
     extra = _DESIGN_TASK_TEMPLATE.format(
         context=format_state_context(state, "guard"),
         extra_instructions=(
             "审核以下设计草稿，不得因为由同事生成就放行。"
-            f"设计草稿：{json.dumps(state.get('design_draft') or {}, ensure_ascii=False)}"
+            f"设计草稿：{draft_json}"
         ),
         json_schema='{"approved": bool, "issues": ["问题1"]}',
     )
@@ -163,7 +175,7 @@ def guard(state: WorkflowState) -> dict:
     round_count = int(state.get("production_guard_round") or 0) + 1
     checkpoint = "GUARD_PASS" if audit.get("approved") else "GUARD_REJECT"
     return {
-        "production_step": 3,
+        "production_step": _STEP_GUARD,
         "design_audit": audit,
         "production_guard_round": round_count,
         "checkpoints": [checkpoint],
@@ -180,7 +192,7 @@ def build(state: WorkflowState) -> dict:
     artifact_dir = _artifact_dir(goal)
     artifact_path = str(artifact_dir / "build.zip")
     components = list(draft.get("components") or [])
-    title = (goal or "Demo")[:80]
+    title = html.escape((goal or "Demo")[:80])
 
     mcp_catalog: dict = {}
     try:
@@ -188,16 +200,17 @@ def build(state: WorkflowState) -> dict:
     except Exception:  # noqa: BLE001
         logger.exception("build: mcp_call tools/list failed")
 
-    html = (
+    escaped_components = [html.escape(str(item)) for item in components[:20]]
+    page_html = (
         "<!doctype html><html><head><meta charset='utf-8'><title>"
         f"{title}</title></head><body><h1>{title}</h1><ul>"
-        + "".join(f"<li>{item}</li>" for item in components[:20])
+        + "".join(f"<li>{item}</li>" for item in escaped_components)
         + "</ul></body></html>"
     )
     repl_code = (
-        "html = " + json.dumps(html, ensure_ascii=False) + "\n"
+        "page_html = " + json.dumps(page_html, ensure_ascii=False) + "\n"
         "f = open('index.html', 'w')\n"
-        "f.write(html)\n"
+        "f.write(page_html)\n"
         "f.close()\n"
         "result = 'index.html'\n"
     )
@@ -235,7 +248,7 @@ def build(state: WorkflowState) -> dict:
         "repl_ok": bool(repl_result.get("ok")),
         "mcp_tools": [item.get("name") for item in (mcp_catalog.get("tools") or []) if isinstance(item, dict)],
     }
-    return {"production_step": 4, "build_artifact": build_artifact, "checkpoints": ["BUILD_DONE"]}
+    return {"production_step": _STEP_BUILD, "build_artifact": build_artifact, "checkpoints": ["BUILD_DONE"]}
 
 
 # -- 05 COMPARE: 视觉还原 --------------------------------------------------
@@ -293,7 +306,7 @@ def compare(state: WorkflowState) -> dict:
         logger.exception("compare: screenshot or diff failed")
 
     checkpoint = "COMPARE_DONE" if not compare_result.get("unverified") else "COMPARE_UNVERIFIED"
-    return {"production_step": 5, "visual_compare": compare_result, "checkpoints": [checkpoint]}
+    return {"production_step": _STEP_COMPARE, "visual_compare": compare_result, "checkpoints": [checkpoint]}
 
 
 # -- 06 VERIFY: QA 验收 ----------------------------------------------------
@@ -317,13 +330,13 @@ def verify(state: WorkflowState) -> dict:
 
     demo: Demo = {
         "artifact_path": build_artifact.get("artifact_path", ""),
-        "version": f"v1.0-step{state.get('production_step', 6)}",
+        "version": f"v1.0-step{state.get('production_step', _STEP_VERIFY)}",
     }
     checkpoint = "VISUAL_PASS" if visual_pass else "VISUAL_UNVERIFIED"
     if not audit.get("approved"):
         checkpoint = "GUARD_FORCED_BUILD"
     return {
-        "production_step": 6,
+        "production_step": _STEP_VERIFY,
         "demo_artifact": demo,
         "checkpoints": [checkpoint, "PRODUCE_DONE"],
     }

@@ -277,10 +277,35 @@ def visual_gate(state: WorkflowState) -> dict:
 
 
 def rehearsal_gate(state: WorkflowState) -> dict:
-    """演示门 — interrupt 等待人工彩排确认。"""
+    """演示门 — interrupt 等待人工彩排确认。
+
+    功能门未过时跳过 interrupt，直接返回失败。
+    """
     demo = state.get("demo_artifact") or {}
     function_pass = bool((state.get("function_gate") or {}).get("pass"))
     visual = state.get("visual_gate") or {}
+    visual_pass = bool(visual.get("pass")) and not visual.get("unverified")
+
+    # 功能门或视觉门未过时，跳过人工彩排
+    if not function_pass or not visual_pass:
+        issue_texts = []
+        if not function_pass:
+            issue_texts.append("功能门未通过，演示门不得放行")
+        if not visual_pass:
+            issue_texts.append("视觉门未通过，演示门不得放行")
+        issues = _issues_from_texts(
+            "rehearsal_gate",
+            issue_texts,
+            risk="high",
+            evidence=json.dumps({"function_pass": function_pass, "visual_pass": visual_pass}),
+        )
+        gate = {"pass": False, "approved": False, "comment": "auto-skipped: gates not passed", "issues": issue_texts}
+        return {
+            "rehearsal_gate": gate,
+            "review_issues": issues,
+            "issues_ledger": issues,
+            "checkpoints": ["REHEARSAL_GATE_SKIP"],
+        }
 
     decision = interrupt(
         {
@@ -348,8 +373,13 @@ def fix_agent(state: WorkflowState) -> dict:
         response = invoke_agent(
             "qa",
             (
-                "请基于下列问题与证据驱动下一轮修复。不要宣称已通过门禁。"
-                "输出 JSON: {\"fix_notes\": [\"改动1\"], \"resolved_ids\": []}。\n"
+                "请基于下列问题与证据驱动下一轮修复。不要宣称已通过门禁。\n"
+                "若问题根因是事实/数据缺失或错误（需重跑 Decision/数据阶段），"
+                "设 reopen_target=\"data\"；若根因是规格缺陷（需重跑"
+                " Production），设 reopen_target=\"produce\"；若可在产物层"
+                "修复则留空。\n"
+                '输出 JSON: {"fix_notes": ["改动1"], "resolved_ids": [], '
+                '"reopen_target": "data"|"produce"|""}.\n'
                 f"{format_state_context(state, 'qa')}\n"
                 f"open_issues: {json.dumps(open_issues, ensure_ascii=False)}"
             ),
@@ -357,9 +387,16 @@ def fix_agent(state: WorkflowState) -> dict:
         parsed = _parse_json(safe_content(response))
         for note in parsed.get("fix_notes") or []:
             fix_notes.append(str(note))
+        # QA 显式回写重跑目标，供 route_after_qa 读取
+        reopen = str(parsed.get("reopen_target") or "").strip().lower()
+        if reopen in {"data", "produce"}:
+            qa_reopen_target = reopen
+        else:
+            qa_reopen_target = ""
     except Exception:  # noqa: BLE001
         logger.exception("fix_agent: QA agent failed")
         fix_notes.append(f"round {round_count}: 自动修复调用失败，保留问题等待重跑门禁")
+        qa_reopen_target = ""
 
     demo["fix_notes"] = fix_notes
     demo["version"] = f"fix-round-{round_count}"
@@ -369,11 +406,18 @@ def fix_agent(state: WorkflowState) -> dict:
         for issue in open_issues
         if issue.get("id")
     ]
+    # 保留已 resolved 的旧问题，避免丢失状态
+    resolved_issues = [
+        issue for issue in issues
+        if issue.get("status") == "resolved" or not issue.get("id")
+    ]
+    all_issues = resolved_issues + updated
     logger.info("fix_agent: round %d, processing %d open issues", round_count, len(updated))
     return {
         "review_round": round_count,
         "demo_artifact": demo,
-        "issues_ledger": updated,
+        "issues_ledger": all_issues,
+        "qa_reopen_target": qa_reopen_target,
         "checkpoints": [f"FIX_ROUND_{round_count}"],
     }
 

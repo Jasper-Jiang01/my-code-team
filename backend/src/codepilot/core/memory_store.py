@@ -16,6 +16,8 @@
 """
 
 import json
+import os
+import tempfile
 import threading
 from pathlib import Path
 from typing import Any
@@ -46,9 +48,23 @@ def _read_json(path: Path, default: dict[str, Any]) -> dict[str, Any]:
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
+    """原子写入 JSON 文件：先写到临时文件再 rename，避免半写状态。"""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        content = json.dumps(data, ensure_ascii=False, indent=2)
+        # 在同目录下创建临时文件，确保 rename 是原子操作
+        fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+            os.replace(tmp_path, path)
+        except Exception:
+            # 清理临时文件
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
     except OSError as exc:
         raise MemoryStoreError(f"Failed to write memory file {path}: {exc}") from exc
 

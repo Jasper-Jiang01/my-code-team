@@ -19,12 +19,12 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     longcat_api_key: str = ""
     longcat_base_url: str = "https://api.longcat.chat/openai"
-    default_model: str = "gpt-4o"
+    default_model: str = "LongCat-2.0"
 
     # 数据库 / Checkpoint
-    database_url: str = "postgresql://user:password@localhost:5432/codepilot"
-    checkpoint_backend: str = "auto"
-    checkpoint_sqlite_path: str = ""
+    database_url: str = ""
+    checkpoint_backend: str = "auto"  # auto | memory | sqlite | postgres | platform
+    checkpoint_sqlite_path: str = "codepilot_checkpoints.db"
 
     # 向量存储
     vector_store_url: str = "http://localhost:6333"

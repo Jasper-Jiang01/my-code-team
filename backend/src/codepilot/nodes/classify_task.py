@@ -71,7 +71,8 @@ def classify_task(state: WorkflowState) -> dict:
         return {"next_step": "research"}
 
     try:
-        model = create_chat_model()
+        # 分类节点是轻量调用，缩短超时与重试避免拖累主流程
+        model = create_chat_model(timeout=30, max_retries=1)
         messages = [
             SystemMessage(content=_CLASSIFIER_SYSTEM_PROMPT),
             HumanMessage(content=_build_classification_context(state)),

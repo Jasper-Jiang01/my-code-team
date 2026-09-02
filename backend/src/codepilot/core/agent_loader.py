@@ -8,8 +8,10 @@
 
 import json
 import logging
+import concurrent.futures
+import uuid
 from dataclasses import dataclass, field
-from functools import cache
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +39,7 @@ from codepilot.tools import (
 logger = logging.getLogger(__name__)
 
 _MAX_TOOL_ROUNDS = 8
+_LLM_TIMEOUT_SEC = 150  # 兜底超时，防止 LongCat 等模型调用永久挂起
 
 # 将工具名称（即 agents/*.yaml 中 `tools:` 引用的名称）映射到实际
 # LangChain 工具对象的注册表。新增工具时需要扩展此处。
@@ -108,7 +111,7 @@ def _resolve_yaml_path(harness_ref: str) -> Path:
     return candidate
 
 
-@cache
+@lru_cache(maxsize=32)
 def load_agent_harness(harness_ref: str) -> AgentHarness:
     """加载并解析一个 Agent Harness 的 YAML 文件。
 
@@ -186,6 +189,29 @@ def build_agent_runnable(
     return chat_model.bind_tools(tools) if tools else chat_model
 
 
+class _LLMTimeoutError(TimeoutError):
+    """LLM 调用超时兜底异常。"""
+
+
+def _invoke_with_timeout(runnable: Runnable, messages: list[Any], seconds: int) -> Any:
+    """在独立线程中调用 ``runnable.invoke``，超时后抛出 ``_LLMTimeoutError``。
+
+    ``ChatOpenAI.timeout`` 参数在部分兼容接口（如 LongCat）上可能不生效，
+    导致 HTTP 连接永久挂起。此函数作为最后一道防线，
+    使用 ``concurrent.futures.ThreadPoolExecutor`` 实现超时，
+    兼容主线程和工作线程场景（不受 SIGALRM 限制）。
+    """
+    import os
+    if os.getenv("CODEPILOT_DISABLE_TIMEOUT_GUARD", "").strip():
+        return runnable.invoke(messages)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ctx:
+        future = ctx.submit(runnable.invoke, messages)
+        try:
+            return future.result(timeout=seconds)
+        except concurrent.futures.TimeoutExpired:
+            raise _LLMTimeoutError(f"LLM call timed out after {seconds}s")
+
+
 def _serialize_tool_result(result: Any) -> str:
     if isinstance(result, str):
         return result
@@ -200,7 +226,11 @@ def _run_tool_loop(runnable: Runnable, tools: list[BaseTool], messages: list[Any
     tool_by_name = {tool.name: tool for tool in tools}
     last_response: Any = None
     for round_index in range(_MAX_TOOL_ROUNDS):
-        last_response = runnable.invoke(messages)
+        try:
+            last_response = _invoke_with_timeout(runnable, messages, _LLM_TIMEOUT_SEC)
+        except _LLMTimeoutError:
+            logger.warning("invoke_agent: round %d LLM call timed out (%ds)", round_index + 1, _LLM_TIMEOUT_SEC)
+            break
         messages.append(last_response)
         tool_calls = getattr(last_response, "tool_calls", None) or []
         if not tool_calls:
@@ -214,7 +244,7 @@ def _run_tool_loop(runnable: Runnable, tools: list[BaseTool], messages: list[Any
         for call in tool_calls:
             name = call.get("name", "")
             tool_obj = tool_by_name.get(name)
-            call_id = call.get("id") or f"{name}-{round_index}"
+            call_id = call.get("id") or f"{name}-{uuid.uuid4().hex[:8]}"
             try:
                 if tool_obj is None:
                     result: Any = {"error": f"unknown tool '{name}'"}
@@ -260,7 +290,11 @@ def _apply_output_schema(
     try:
         model_cls = model_from_output_schema(harness.name, harness.output_schema)
         structured = chat_model.with_structured_output(model_cls)
-        result = structured.invoke(messages)
+        try:
+            result = _invoke_with_timeout(structured, messages, _LLM_TIMEOUT_SEC)
+        except _LLMTimeoutError:
+            logger.warning("invoke_agent: structured_output call timed out (%ds)", _LLM_TIMEOUT_SEC)
+            raise
         if hasattr(result, "model_dump"):
             validated = result.model_dump()
         elif isinstance(result, dict):
@@ -319,5 +353,12 @@ def invoke_agent(
         HumanMessage(content=content),
     ]
     tools = harness.tools
-    response = runnable.invoke(messages) if not tools else _run_tool_loop(runnable, tools, messages)
+    if tools:
+        response = _run_tool_loop(runnable, tools, messages)
+    else:
+        try:
+            response = _invoke_with_timeout(runnable, messages, _LLM_TIMEOUT_SEC)
+        except _LLMTimeoutError:
+            logger.warning("invoke_agent: %s LLM call timed out (%ds)", harness.name, _LLM_TIMEOUT_SEC)
+            raise
     return _apply_output_schema(harness, response, chat_model, messages)

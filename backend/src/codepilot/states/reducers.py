@@ -10,12 +10,36 @@
 from typing import Any
 
 
+def last_write_wins(left: Any, right: Any) -> Any:
+    """取右值（最后写入胜出），适用于计数字段。"""
+    return right if right is not None else left
+
+
 def unique_extend(left: list[Any] | None, right: list[Any] | None) -> list[Any]:
-    """追加 ``right`` 中尚未出现过的元素，保持原有顺序。"""
+    """追加 ``right`` 中尚未出现过的元素，保持原有顺序。
+
+    使用 ``dict`` 做去重（O(n)），避免 ``list.index()`` 的 O(n²) 复杂度。
+    对不可哈希的元素（如 dict）退化为线性查找。
+    """
     result: list[Any] = list(left or [])
+    # 尝试用 dict 做哈希去重（对可哈希元素 O(1)）
+    seen: dict[Any, None] = {}
+    unhashable: list[Any] = []  # 存放不可哈希的元素
+    for item in result:
+        try:
+            seen[item] = None
+        except TypeError:
+            unhashable.append(item)
     for item in right or []:
-        if item not in result:
+        try:
+            if item in seen:
+                continue
+            seen[item] = None
             result.append(item)
+        except TypeError:
+            if item not in unhashable:
+                unhashable.append(item)
+                result.append(item)
     return result
 
 

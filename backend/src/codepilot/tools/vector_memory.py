@@ -82,7 +82,7 @@ def embed_text(text: str, dim: int = _EMBED_DIM) -> list[float]:
     """把文本哈希成固定维度向量（signed bag-of-words），用于离线 cosine 检索。"""
     vec = [0.0] * dim
     for token in _tokens(text):
-        digest = hashlib.md5(token.encode("utf-8")).digest()
+        digest = hashlib.sha256(token.encode("utf-8")).digest()
         index = int.from_bytes(digest[:2], "big") % dim
         sign = 1.0 if digest[2] % 2 == 0 else -1.0
         vec[index] += sign

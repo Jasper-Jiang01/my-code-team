@@ -72,7 +72,10 @@ def create_checkpointer(explicit: object | None = None) -> object | None:
             path = _sqlite_path()
             path.parent.mkdir(parents=True, exist_ok=True)
             conn = sqlite3.connect(str(path), check_same_thread=False)
-            logger.info("using SqliteSaver at %s", path)
+            # 启用 WAL 模式，提升多线程/多进程并发读写性能
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")
+            logger.info("using SqliteSaver at %s (WAL mode)", path)
             return SqliteSaver(conn)
         except Exception:
             logger.exception("SqliteSaver unavailable, falling back to MemorySaver")

@@ -90,6 +90,7 @@ def _playwright_screenshot(html_path: Path, output_path: Path) -> bool:
         from playwright.sync_api import sync_playwright
     except ImportError:
         return False
+    browser = None
     try:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch()
@@ -97,11 +98,16 @@ def _playwright_screenshot(html_path: Path, output_path: Path) -> bool:
             page.goto(html_path.resolve().as_uri(), wait_until="load")
             output_path.parent.mkdir(parents=True, exist_ok=True)
             page.screenshot(path=str(output_path), full_page=False)
-            browser.close()
         return True
     except Exception:
         logger.exception("playwright screenshot failed")
         return False
+    finally:
+        if browser is not None:
+            try:
+                browser.close()
+            except Exception:  # noqa: BLE001
+                logger.warning("playwright: browser.close() failed, process may leak")
 
 
 @tool

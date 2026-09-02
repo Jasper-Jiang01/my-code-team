@@ -8,6 +8,7 @@ from codepilot.graphs.problem_discovery import build_problem_discovery_graph
 from codepilot.graphs.production import build_production_graph
 from codepilot.graphs.review import build_review_graph
 from codepilot.nodes import (
+    chitchat,
     classify_task,
     human_confirm,
     mark_decision_snapshot,
@@ -27,6 +28,8 @@ def build_main_workflow(checkpointer: object | None = None) -> CompiledStateGrap
     """
     builder = StateGraph(WorkflowState)
 
+    # ★ chitchat：简单对话短路节点，放在 classify 之前
+    builder.add_node("chitchat", chitchat)
     builder.add_node("classify", classify_task)
     builder.add_node("research", build_problem_discovery_graph())
     builder.add_node("data", build_decision_graph())
@@ -36,7 +39,16 @@ def build_main_workflow(checkpointer: object | None = None) -> CompiledStateGrap
     builder.add_node("qa", build_review_graph())
     builder.add_node("human_confirm", human_confirm)
 
-    builder.set_entry_point("classify")
+    # 入口改为 chitchat：简单对话直接短路到 END，复杂问题放行到 classify
+    builder.set_entry_point("chitchat")
+    builder.add_conditional_edges(
+        "chitchat",
+        lambda state: "__end__" if state.get("next_step") == "end" else "classify",
+        {
+            "__end__": END,
+            "classify": "classify",
+        },
+    )
     builder.add_conditional_edges(
         "classify",
         route_task,

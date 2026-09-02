@@ -13,7 +13,7 @@ from codepilot.states.workflow_state import WorkflowState
 
 logger = logging.getLogger(__name__)
 
-_MAX_ROUNDS = 3
+_MAX_ROUNDS = 2
 
 _CRITIC_TASK_TEMPLATE = """\
 你被授权读取的 State Bus 字段：

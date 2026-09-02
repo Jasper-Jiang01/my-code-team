@@ -9,8 +9,7 @@ system_prompt: |
 
   只输出 JSON，格式为：
   {"approved": bool, "issues": ["问题1"]}
-tools:
-  - screenshot_diff
+tools: []
 output_schema:
   approved: bool
   issues: list

@@ -28,6 +28,7 @@ def fingerprint_facts(facts: list | None) -> str:
                 "source": item.get("source"),
                 "metric": item.get("metric"),
                 "value": item.get("value"),
+                "definition": item.get("definition"),
             }
         )
     rows.sort(key=lambda row: str(row.get("id") or ""))
@@ -37,10 +38,11 @@ def fingerprint_facts(facts: list | None) -> str:
 def fingerprint_spec(spec: dict | None) -> str:
     if not spec:
         return ""
+    constraints = sorted(spec.get("constraints") or [])
     return fingerprint(
         {
             "goal": spec.get("goal"),
             "scope": spec.get("scope"),
-            "constraints": spec.get("constraints") or [],
+            "constraints": constraints,
         }
     )

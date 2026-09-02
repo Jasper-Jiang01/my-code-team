@@ -1,5 +1,6 @@
 """工作流图的节点函数。"""
 
+from codepilot.nodes.chitchat import chitchat
 from codepilot.nodes.classify_task import classify_task
 from codepilot.nodes.critic import critic
 from codepilot.nodes.execute_data import execute_data
@@ -45,6 +46,7 @@ from codepilot.nodes.tournament import (
 
 __all__ = [
     "build",
+    "chitchat",
     "classify_task",
     "compare",
     "critic",

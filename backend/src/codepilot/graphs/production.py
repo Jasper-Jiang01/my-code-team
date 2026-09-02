@@ -26,7 +26,7 @@ from codepilot.nodes import (
 )
 from codepilot.states.workflow_state import WorkflowState
 
-_MAX_GUARD_ROUNDS = 3
+_MAX_GUARD_ROUNDS = 2
 
 
 def _after_guard(state: WorkflowState) -> str:
@@ -65,7 +65,9 @@ def build_production_graph() -> CompiledStateGraph:
     builder.add_edge("compare", "verify")
     builder.add_edge("verify", END)
 
-    return builder.compile()
+    # 子图不设置独立 checkpointer，由主图的 checkpointer 统一管理持久化，
+    # 避免 checkpoint 嵌套冲突。
+    return builder.compile(checkpointer=False)
 
 
 graph = build_production_graph()

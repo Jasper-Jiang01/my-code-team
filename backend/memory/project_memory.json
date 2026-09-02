@@ -37,7 +37,29 @@
     "本地生活服务平台首页个性化推荐算法机制与效果评估",
     "B端商家经营数据看板设计最佳实践与用户需求调研",
     "大众点评首页加载性能优化方案与前端监控指标体系",
-    "本地生活服务平台用户增长驱动因素与留存策略研究"
+    "本地生活服务平台用户增长驱动因素与留存策略研究",
+    "大众点评首页个性化推荐算法机制与效果评估",
+    "本地生活服务平台首页用户转化率提升策略与商业变现模式",
+    "你好",
+    "你好",
+    "你好",
+    "给我一份大众点评首页升级的文字方案",
+    "给我一份大众点评首页升级的文字方案",
+    "给我一份大众点评首页升级的文字方案",
+    "给我一份大众点评首页升级的文字方案",
+    "大众点评业务的发展有什么方向",
+    "大众点评业务的发展有什么方向",
+    "大众点评业务的发展有什么方向",
+    "大众点评业务的发展有什么方向",
+    "大众点评业务的发展有什么方向",
+    "大众点评业务的发展有什么方向",
+    "大众点评业务的发展有什么方向",
+    "大众点评业务的发展有什么方向",
+    "你会什么",
+    "你会什么",
+    "你会什么",
+    "你会什么",
+    "你会什么"
   ],
   "research_index": [
     {
@@ -234,8 +256,285 @@
       "source": "no_result",
       "metric": "本地生活服务平台用户增长驱动因素与留存策略研究",
       "timestamp": "2026-09-01T11:52:27.628922+00:00"
+    },
+    {
+      "source": "no_result",
+      "metric": "大众点评首页UI/UX设计最佳实践与用户体验优化案例研究",
+      "timestamp": "2026-09-01T11:57:45.004125+00:00"
+    },
+    {
+      "source": "no_result",
+      "metric": "大众点评首页个性化推荐算法机制与效果评估",
+      "timestamp": "2026-09-01T11:57:45.010902+00:00"
+    },
+    {
+      "source": "no_result",
+      "metric": "大众点评首页信息架构设计与竞品对比分析（美团/小红书/抖音本地生活）",
+      "timestamp": "2026-09-01T11:57:45.014745+00:00"
+    },
+    {
+      "source": "no_result",
+      "metric": "大众点评首页加载性能优化方案与前端监控指标体系",
+      "timestamp": "2026-09-01T11:57:45.014899+00:00"
+    },
+    {
+      "source": "no_result",
+      "metric": "本地生活服务平台首页用户转化率提升策略与商业变现模式",
+      "timestamp": "2026-09-01T11:57:45.015106+00:00"
+    },
+    {
+      "id": "624fa926851e2d30",
+      "source": "km_fixture",
+      "metric": "你好",
+      "definition": "内部研究摘录: 你好",
+      "value": "与「你好」相关的既有研究结论与口径说明。",
+      "url": "km://fixture/%E4%BD%A0%E5%A5%BD/1",
+      "snippet": "与「你好」相关的既有研究结论与口径说明。",
+      "timestamp": "2026-09-02T02:24:49.439229+00:00"
+    },
+    {
+      "id": "b1582f3d89551f33",
+      "source": "km_fixture",
+      "metric": "你好",
+      "definition": "竞品与案例: 你好",
+      "value": "围绕「你好」的外部对标案例与可复用模式。",
+      "url": "km://fixture/%E4%BD%A0%E5%A5%BD/2",
+      "snippet": "围绕「你好」的外部对标案例与可复用模式。",
+      "timestamp": "2026-09-02T02:24:49.439245+00:00"
+    },
+    {
+      "id": "a74e17945d33dbb7",
+      "source": "km_fixture",
+      "metric": "你好",
+      "definition": "风险与约束: 你好",
+      "value": "落地「你好」时需要标注的数据口径、合规与依赖风险。",
+      "url": "km://fixture/%E4%BD%A0%E5%A5%BD/3",
+      "snippet": "落地「你好」时需要标注的数据口径、合规与依赖风险。",
+      "timestamp": "2026-09-02T02:24:49.439252+00:00"
+    },
+    {
+      "id": "8cc0ab5b1c64ccea",
+      "source": "km_fixture",
+      "metric": "给我一份大众点评首页升级的文字方案",
+      "definition": "内部研究摘录: 给我一份大众点评首页升级的文字方案",
+      "value": "与「给我一份大众点评首页升级的文字方案」相关的既有研究结论与口径说明。",
+      "url": "km://fixture/%E7%BB%99%E6%88%91%E4%B8%80%E4%BB%BD%E5%A4%A7%E4%BC%97%E7%82%B9%E8%AF%84%E9%A6%9/1",
+      "snippet": "与「给我一份大众点评首页升级的文字方案」相关的既有研究结论与口径说明。",
+      "timestamp": "2026-09-02T02:41:18.622981+00:00"
+    },
+    {
+      "id": "7a4ff528b6498350",
+      "source": "km_fixture",
+      "metric": "给我一份大众点评首页升级的文字方案",
+      "definition": "竞品与案例: 给我一份大众点评首页升级的文字方案",
+      "value": "围绕「给我一份大众点评首页升级的文字方案」的外部对标案例与可复用模式。",
+      "url": "km://fixture/%E7%BB%99%E6%88%91%E4%B8%80%E4%BB%BD%E5%A4%A7%E4%BC%97%E7%82%B9%E8%AF%84%E9%A6%9/2",
+      "snippet": "围绕「给我一份大众点评首页升级的文字方案」的外部对标案例与可复用模式。",
+      "timestamp": "2026-09-02T02:41:18.623049+00:00"
+    },
+    {
+      "id": "4351d122d067751c",
+      "source": "km_fixture",
+      "metric": "给我一份大众点评首页升级的文字方案",
+      "definition": "风险与约束: 给我一份大众点评首页升级的文字方案",
+      "value": "落地「给我一份大众点评首页升级的文字方案」时需要标注的数据口径、合规与依赖风险。",
+      "url": "km://fixture/%E7%BB%99%E6%88%91%E4%B8%80%E4%BB%BD%E5%A4%A7%E4%BC%97%E7%82%B9%E8%AF%84%E9%A6%9/3",
+      "snippet": "落地「给我一份大众点评首页升级的文字方案」时需要标注的数据口径、合规与依赖风险。",
+      "timestamp": "2026-09-02T02:41:18.623069+00:00"
+    },
+    {
+      "id": "d482847732ad6172",
+      "source": "km_fixture",
+      "metric": "给我一份大众点评首页升级的文字方案",
+      "definition": "你好",
+      "value": "落地「你好」时需要标注的数据口径、合规与依赖风险。",
+      "url": "km://fixture/%E4%BD%A0%E5%A5%BD/3",
+      "snippet": "落地「你好」时需要标注的数据口径、合规与依赖风险。",
+      "timestamp": "2026-09-02T02:41:18.623085+00:00"
+    },
+    {
+      "id": "10d3411dce27fd69",
+      "source": "km_fixture",
+      "metric": "大众点评业务的发展有什么方向",
+      "definition": "内部研究摘录: 大众点评业务的发展有什么方向",
+      "value": "与「大众点评业务的发展有什么方向」相关的既有研究结论与口径说明。",
+      "url": "km://fixture/%E5%A4%A7%E4%BC%97%E7%82%B9%E8%AF%84%E4%B8%9A%E5%8A%A1%E7%9A%84%E5%8F%91%E5%B1%9/1",
+      "snippet": "与「大众点评业务的发展有什么方向」相关的既有研究结论与口径说明。",
+      "timestamp": "2026-09-02T03:10:01.365102+00:00"
+    },
+    {
+      "id": "44ae92c28a6e3353",
+      "source": "km_fixture",
+      "metric": "大众点评业务的发展有什么方向",
+      "definition": "竞品与案例: 大众点评业务的发展有什么方向",
+      "value": "围绕「大众点评业务的发展有什么方向」的外部对标案例与可复用模式。",
+      "url": "km://fixture/%E5%A4%A7%E4%BC%97%E7%82%B9%E8%AF%84%E4%B8%9A%E5%8A%A1%E7%9A%84%E5%8F%91%E5%B1%9/2",
+      "snippet": "围绕「大众点评业务的发展有什么方向」的外部对标案例与可复用模式。",
+      "timestamp": "2026-09-02T03:10:01.365134+00:00"
+    },
+    {
+      "id": "406a340fd1a2851c",
+      "source": "km_fixture",
+      "metric": "大众点评业务的发展有什么方向",
+      "definition": "风险与约束: 大众点评业务的发展有什么方向",
+      "value": "落地「大众点评业务的发展有什么方向」时需要标注的数据口径、合规与依赖风险。",
+      "url": "km://fixture/%E5%A4%A7%E4%BC%97%E7%82%B9%E8%AF%84%E4%B8%9A%E5%8A%A1%E7%9A%84%E5%8F%91%E5%B1%9/3",
+      "snippet": "落地「大众点评业务的发展有什么方向」时需要标注的数据口径、合规与依赖风险。",
+      "timestamp": "2026-09-02T03:10:01.365141+00:00"
+    },
+    {
+      "id": "414a73db69133980",
+      "source": "km_fixture",
+      "metric": "大众点评业务的发展有什么方向",
+      "definition": "给我一份大众点评首页升级的文字方案",
+      "value": "围绕「给我一份大众点评首页升级的文字方案」的外部对标案例与可复用模式。",
+      "url": "km://fixture/%E7%BB%99%E6%88%91%E4%B8%80%E4%BB%BD%E5%A4%A7%E4%BC%97%E7%82%B9%E8%AF%84%E9%A6%9/2",
+      "snippet": "围绕「给我一份大众点评首页升级的文字方案」的外部对标案例与可复用模式。",
+      "timestamp": "2026-09-02T03:10:01.365147+00:00"
+    },
+    {
+      "id": "eee8a95257a5f581",
+      "source": "km_fixture",
+      "metric": "大众点评业务的发展有什么方向",
+      "definition": "给我一份大众点评首页升级的文字方案",
+      "value": "与「给我一份大众点评首页升级的文字方案」相关的既有研究结论与口径说明。",
+      "url": "km://fixture/%E7%BB%99%E6%88%91%E4%B8%80%E4%BB%BD%E5%A4%A7%E4%BC%97%E7%82%B9%E8%AF%84%E9%A6%9/1",
+      "snippet": "与「给我一份大众点评首页升级的文字方案」相关的既有研究结论与口径说明。",
+      "timestamp": "2026-09-02T03:10:01.365153+00:00"
+    },
+    {
+      "id": "2d7d65c41f58dcca",
+      "source": "km_fixture",
+      "metric": "大众点评业务的发展有什么方向",
+      "definition": "给我一份大众点评首页升级的文字方案",
+      "value": "落地「给我一份大众点评首页升级的文字方案」时需要标注的数据口径、合规与依赖风险。",
+      "url": "km://fixture/%E7%BB%99%E6%88%91%E4%B8%80%E4%BB%BD%E5%A4%A7%E4%BC%97%E7%82%B9%E8%AF%84%E9%A6%9/3",
+      "snippet": "落地「给我一份大众点评首页升级的文字方案」时需要标注的数据口径、合规与依赖风险。",
+      "timestamp": "2026-09-02T03:10:01.365158+00:00"
+    },
+    {
+      "id": "de365a67c8a706e1",
+      "source": "km_fixture",
+      "metric": "大众点评业务的发展有什么方向",
+      "definition": "给我一份大众点评首页升级的文字方案",
+      "value": "落地「你好」时需要标注的数据口径、合规与依赖风险。",
+      "url": "km://fixture/%E4%BD%A0%E5%A5%BD/3",
+      "snippet": "落地「你好」时需要标注的数据口径、合规与依赖风险。",
+      "timestamp": "2026-09-02T03:10:01.365162+00:00"
+    },
+    {
+      "id": "14258d7156d72426",
+      "source": "km_fixture",
+      "metric": "大众点评业务的发展有什么方向",
+      "definition": "你好",
+      "value": "围绕「你好」的外部对标案例与可复用模式。",
+      "url": "km://fixture/%E4%BD%A0%E5%A5%BD/2",
+      "snippet": "围绕「你好」的外部对标案例与可复用模式。",
+      "timestamp": "2026-09-02T03:10:01.365166+00:00"
+    },
+    {
+      "id": "8de4f9cfde0c75ec",
+      "source": "km_fixture",
+      "metric": "你会什么",
+      "definition": "内部研究摘录: 你会什么",
+      "value": "与「你会什么」相关的既有研究结论与口径说明。",
+      "url": "km://fixture/%E4%BD%A0%E4%BC%9A%E4%BB%80%E4%B9%88/1",
+      "snippet": "与「你会什么」相关的既有研究结论与口径说明。",
+      "timestamp": "2026-09-02T03:42:31.810365+00:00"
+    },
+    {
+      "id": "f1365cb893035c5d",
+      "source": "km_fixture",
+      "metric": "你会什么",
+      "definition": "竞品与案例: 你会什么",
+      "value": "围绕「你会什么」的外部对标案例与可复用模式。",
+      "url": "km://fixture/%E4%BD%A0%E4%BC%9A%E4%BB%80%E4%B9%88/2",
+      "snippet": "围绕「你会什么」的外部对标案例与可复用模式。",
+      "timestamp": "2026-09-02T03:42:31.810400+00:00"
+    },
+    {
+      "id": "d2acdcf2115ea312",
+      "source": "km_fixture",
+      "metric": "你会什么",
+      "definition": "风险与约束: 你会什么",
+      "value": "落地「你会什么」时需要标注的数据口径、合规与依赖风险。",
+      "url": "km://fixture/%E4%BD%A0%E4%BC%9A%E4%BB%80%E4%B9%88/3",
+      "snippet": "落地「你会什么」时需要标注的数据口径、合规与依赖风险。",
+      "timestamp": "2026-09-02T03:42:31.810410+00:00"
+    },
+    {
+      "id": "c2f93f18439b80ad",
+      "source": "km_fixture",
+      "metric": "你会什么",
+      "definition": "你好",
+      "value": "与「你好」相关的既有研究结论与口径说明。",
+      "url": "km://fixture/%E4%BD%A0%E5%A5%BD/1",
+      "snippet": "与「你好」相关的既有研究结论与口径说明。",
+      "timestamp": "2026-09-02T03:42:31.810418+00:00"
+    },
+    {
+      "id": "088de383ac33406d",
+      "source": "km_fixture",
+      "metric": "你会什么",
+      "definition": "你好",
+      "value": "落地「你好」时需要标注的数据口径、合规与依赖风险。",
+      "url": "km://fixture/%E4%BD%A0%E5%A5%BD/3",
+      "snippet": "落地「你好」时需要标注的数据口径、合规与依赖风险。",
+      "timestamp": "2026-09-02T03:42:31.810424+00:00"
     }
   ],
-  "data_metrics": [],
+  "data_metrics": [
+    {
+      "name": "weekly_active_merchants",
+      "value": "12800",
+      "definition": "近7日有经营行为的商家数（去重）"
+    },
+    {
+      "name": "report_reach_uv",
+      "value": "5400",
+      "definition": "经营周报触达UV（推送成功且曝光）"
+    },
+    {
+      "name": "report_click_rate",
+      "value": "0.23",
+      "definition": "经营周报点击率 = 点击UV / 触达UV"
+    },
+    {
+      "name": "weekly_active_merchants",
+      "value": "12800",
+      "definition": "近 7 日有经营行为的商家数（去重）"
+    },
+    {
+      "name": "report_reach_uv",
+      "value": "5400",
+      "definition": "经营周报触达 UV（推送成功且曝光）"
+    },
+    {
+      "name": "report_click_rate",
+      "value": "0.23",
+      "definition": "经营周报点击率 = 点击 UV / 触达 UV"
+    },
+    {
+      "metric": "weekly_active_merchants",
+      "value": 12800,
+      "definition": "近 7 日有经营行为的商家数（去重）",
+      "unit": "户",
+      "sql_echo": "SELECT metric, value, definition FROM metrics WHERE context = :context"
+    },
+    {
+      "metric": "report_reach_uv",
+      "value": 5400,
+      "definition": "经营周报触达 UV（推送成功且曝光）",
+      "unit": "人",
+      "sql_echo": "SELECT metric, value, definition FROM metrics WHERE context = :context"
+    },
+    {
+      "metric": "report_click_rate",
+      "value": 0.23,
+      "definition": "经营周报点击率 = 点击 UV / 触达 UV",
+      "unit": "ratio",
+      "sql_echo": "SELECT metric, value, definition FROM metrics WHERE context = :context"
+    }
+  ],
   "historical_judgments": []
 }
