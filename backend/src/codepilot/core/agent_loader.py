@@ -220,7 +220,7 @@ def _invoke_with_timeout(runnable: Runnable, messages: list[Any], seconds: int) 
         future = ctx.submit(runnable.invoke, messages)
         try:
             return future.result(timeout=seconds)
-        except concurrent.futures.TimeoutExpired:
+        except concurrent.futures.TimeoutError:
             raise _LLMTimeoutError(f"LLM call timed out after {seconds}s")
 
 

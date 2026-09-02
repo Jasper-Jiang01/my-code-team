@@ -19,7 +19,7 @@ import logging
 from pathlib import Path
 
 from codepilot.core.agent_loader import invoke_agent
-from codepilot.core.config import settings
+from codepilot.core.config import writable_artifacts_dir
 from codepilot.core.context_views import format_state_context
 from codepilot.core.intent_router import needs_tool, resolve_intent
 from codepilot.core.llm_utils import extract_json, safe_content
@@ -36,8 +36,6 @@ from codepilot.tools import (
 logger = logging.getLogger(__name__)
 
 
-_DEFAULT_ARTIFACTS_DIR = str(Path.home() / "Desktop" / "CodePilot_artifacts")
-
 # 静态六步子流程的步骤编号常量
 _STEP_EXPLORE = 1
 _STEP_GENERATE = 2
@@ -48,14 +46,13 @@ _STEP_VERIFY = 6
 
 
 def _artifact_dir(goal: str) -> Path:
-    """返回本次运行的产物落盘目录（位于 ``settings.artifacts_dir`` 下）。
+    """返回本次运行的产物落盘目录。
 
-    若配置为空（如 ``.env`` 中显式设为空字符串），回退到桌面默认目录，
-    避免产物被误写到相对路径 / 当前工作目录下。
+    优先 ``settings.artifacts_dir``；目录不可写时回退到仓库 ``artifacts/``，
+    避免默认桌面路径在 langgraph / macOS 沙箱里 PermissionError。
     """
     safe_name = "".join(c if c.isalnum() or c in "-_ " else "_" for c in goal[:32]).strip() or "demo"
-    base_dir = settings.artifacts_dir.strip() or _DEFAULT_ARTIFACTS_DIR
-    return Path(base_dir) / safe_name
+    return writable_artifacts_dir() / safe_name
 
 
 _DESIGN_TASK_TEMPLATE = """\
@@ -126,39 +123,49 @@ def explore(state: WorkflowState) -> dict:
 
 
 def generate(state: WorkflowState) -> dict:
-    """02 GENERATE — 产出设计草稿。"""
+    """02 GENERATE — 产出设计草稿。
+
+    出原型 / 写需求时不调 LLM（外网代理失败会把整步打挂），直接跑
+    ``pde_prototype`` 落盘 HTML。完整 Demo 仍先让设计 Agent 补组件清单。
+    """
     intent = resolve_intent(state)
-    draft = state.get("design_draft") or {}
+    draft = dict(state.get("design_draft") or {})
     audit = state.get("design_audit") or {}
-    audit_note = ""
-    if audit.get("issues"):
-        audit_note = f"上一轮 GUARD 未通过，必须逐条修订：{json.dumps(audit.get('issues'), ensure_ascii=False)}"
-    use_pde = needs_tool(state, "pde_prototype")
-    extra = _DESIGN_TASK_TEMPLATE.format(
-        context=format_state_context(state, "design"),
-        extra_instructions=(
-            "基于需求增量，产出高保真设计草稿（组件清单、布局结构、交互流）。"
-            + (
-                "页面原型图/设计稿请调用 pde_prototype（点评 PDE Agent，"
-                "https://km.sankuai.com/collabpage/2776444575）。"
-                if use_pde
-                else "本轮不调用原型或代码工具，只输出 JSON 草稿。"
+    use_pde = needs_tool(state, "pde_prototype") or intent.kind in {"prototype", "spec"}
+    skip_llm = intent.kind in {"prototype", "spec"}
+
+    if not skip_llm:
+        audit_note = ""
+        if audit.get("issues"):
+            audit_note = (
+                "上一轮 GUARD 未通过，必须逐条修订："
+                f"{json.dumps(audit.get('issues'), ensure_ascii=False)}"
             )
-            + ((" " + audit_note) if audit_note else "")
-        ),
-        json_schema='{"components": ["组件1"], "layout": "...", "interactions": ["流1"]}',
-    )
-    try:
-        response = invoke_agent(
-            "design",
-            extra,
-            allowed_tools=["pde_prototype"] if use_pde else [],
+        extra = _DESIGN_TASK_TEMPLATE.format(
+            context=format_state_context(state, "design"),
+            extra_instructions=(
+                "基于需求增量，产出高保真设计草稿（组件清单、布局结构、交互流）。"
+                + (
+                    "页面原型图/设计稿请调用 pde_prototype（点评 PDE Agent，"
+                    "https://km.sankuai.com/collabpage/2776444575）。"
+                    if use_pde
+                    else "本轮不调用原型或代码工具，只输出 JSON 草稿。"
+                )
+                + ((" " + audit_note) if audit_note else "")
+            ),
+            json_schema='{"components": ["组件1"], "layout": "...", "interactions": ["流1"]}',
         )
-        parsed = _parse_json(safe_content(response))
-        if parsed:
-            draft = {**draft, **parsed}
-    except Exception:  # noqa: BLE001
-        logger.exception("generate: failed via LLM")
+        try:
+            response = invoke_agent(
+                "design",
+                extra,
+                allowed_tools=["pde_prototype"] if use_pde else [],
+            )
+            parsed = _parse_json(safe_content(response))
+            if parsed:
+                draft = {**draft, **parsed}
+        except Exception:  # noqa: BLE001
+            logger.exception("generate: failed via LLM")
 
     goal = state.get("goal", "demo")
     artifact_dir = _artifact_dir(goal)
@@ -174,6 +181,8 @@ def generate(state: WorkflowState) -> dict:
                     "output_dir": str(artifact_dir),
                 }
             )
+            if not isinstance(proto, dict):
+                proto = {}
         except Exception:  # noqa: BLE001
             logger.exception("generate: pde_prototype failed")
             proto = {}
@@ -194,10 +203,40 @@ def generate(state: WorkflowState) -> dict:
             "unverified": proto.get("unverified"),
         }
 
-    html_path = Path(str(proto.get("html_path") or ""))
-    if not html_path.exists() and (use_pde or needs_tool(state, "python_repl")):
-        _export_design_html(artifact_dir, goal, draft)
-    return {"production_step": _STEP_GENERATE, "design_draft": draft, "checkpoints": ["GENERATE_DONE"]}
+    raw_html = str((draft.get("prototype") or {}).get("html_path") or proto.get("html_path") or "").strip()
+    html_path = Path(raw_html) if raw_html else None
+    if (html_path is None or not html_path.exists()) and (
+        use_pde or needs_tool(state, "python_repl")
+    ):
+        try:
+            html_path = _export_design_html(artifact_dir, goal, draft)
+            draft.setdefault("prototype", {})
+            if isinstance(draft["prototype"], dict):
+                draft["prototype"]["html_path"] = str(html_path)
+        except Exception:  # noqa: BLE001
+            logger.exception("generate: fallback html export failed")
+            html_path = None
+
+    reply = ""
+    if use_pde:
+        if html_path is not None and html_path.exists():
+            reply = (
+                f"已按需求产出页面原型。\n文件：{html_path}\n"
+                "操作指南：https://km.sankuai.com/collabpage/2776444575"
+            )
+        else:
+            reply = (
+                "原型生成失败：未能写入 HTML。"
+                "请确认 ARTIFACTS_DIR 可写，或查看 backend/artifacts。"
+            )
+    updates: dict = {
+        "production_step": _STEP_GENERATE,
+        "design_draft": draft,
+        "checkpoints": ["GENERATE_DONE"],
+    }
+    if reply:
+        updates["chitchat_reply"] = reply
+    return updates
 
 
 # -- 03 GUARD: DP 审核 -----------------------------------------------------
@@ -410,9 +449,12 @@ def verify(state: WorkflowState) -> dict:
         html_path = str(proto.get("html_path") or "")
         url = str(build_artifact.get("url") or "")
         if intent.kind == "prototype":
+            exists = bool(html_path) and Path(html_path).exists()
             updates["chitchat_reply"] = (
-                f"已按需求产出页面原型。\n文件：{html_path or _artifact_dir(state.get('goal', 'demo'))}"
-                "\n操作指南：https://km.sankuai.com/collabpage/2776444575"
+                f"已按需求产出页面原型。\n文件：{html_path}\n"
+                "操作指南：https://km.sankuai.com/collabpage/2776444575"
+                if exists
+                else "原型生成失败：未能写入 HTML。请确认 ARTIFACTS_DIR 可写。"
             )
         elif intent.kind == "spec":
             updates["chitchat_reply"] = (

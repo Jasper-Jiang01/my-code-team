@@ -18,7 +18,7 @@ from typing import Any
 import httpx
 from langchain_core.tools import tool
 
-from codepilot.core.config import settings
+from codepilot.core.config import settings, writable_artifacts_dir
 
 logger = logging.getLogger(__name__)
 
@@ -194,10 +194,18 @@ def _render_local_html(
 
 
 def _write_html(output_dir: Path, markup: str) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / "design.html"
-    path.write_text(markup, encoding="utf-8")
-    return path
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        path = output_dir / "design.html"
+        path.write_text(markup, encoding="utf-8")
+        return path
+    except OSError:
+        logger.warning("pde_prototype: cannot write %s, falling back", output_dir)
+        fallback = writable_artifacts_dir() / output_dir.name
+        fallback.mkdir(parents=True, exist_ok=True)
+        path = fallback / "design.html"
+        path.write_text(markup, encoding="utf-8")
+        return path
 
 
 def _extract_remote_html(payload: dict[str, Any]) -> str:

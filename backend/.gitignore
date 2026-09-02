@@ -23,6 +23,9 @@ wheels/
 # Tests
 .pytest_cache/
 
+# Generated prototypes / demos
+artifacts/
+
 # Virtual environments
 .env
 .venv

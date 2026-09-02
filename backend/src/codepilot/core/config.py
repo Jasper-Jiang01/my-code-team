@@ -4,6 +4,8 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_BACKEND_ROOT = Path(__file__).resolve().parents[3]
+
 
 class Settings(BaseSettings):
     """从环境变量中加载的应用设置。"""
@@ -47,8 +49,32 @@ class Settings(BaseSettings):
     pde_endpoint: str = ""
     pde_timeout: float = 60.0
 
-    # 生产阶段产物落盘目录（用于本地测试查看 Demo 产物/截图等）
-    artifacts_dir: str = str(Path.home() / "Desktop" / "CodePilot_artifacts")
+    # 生产阶段产物落盘目录。默认写 backend/artifacts，避免 macOS 对桌面目录无写权限。
+    artifacts_dir: str = str(_BACKEND_ROOT / "artifacts")
 
 
 settings = Settings()
+
+
+def writable_artifacts_dir() -> Path:
+    """返回一个确实可写的产物目录。桌面被沙箱拦住时回退到仓库 ``artifacts/``。"""
+    candidates = []
+    configured = (settings.artifacts_dir or "").strip()
+    if configured:
+        candidates.append(Path(configured))
+    candidates.extend((_BACKEND_ROOT / "artifacts", Path.cwd() / "artifacts"))
+    seen: set[Path] = set()
+    for path in candidates:
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        try:
+            resolved.mkdir(parents=True, exist_ok=True)
+            probe = resolved / ".codepilot_write"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink(missing_ok=True)
+            return resolved
+        except OSError:
+            continue
+    return Path.cwd()

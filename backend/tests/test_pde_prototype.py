@@ -72,16 +72,22 @@ def test_generate_uses_pde_prototype(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "pde_endpoint", "")
 
     def _fake_agent(*_args, **_kwargs):
-        return '{"components": ["搜索框"], "layout": "list", "interactions": ["搜索"]}'
+        raise AssertionError("prototype generate must not call LLM")
 
     monkeypatch.setattr("codepilot.nodes.production_steps.invoke_agent", _fake_agent)
-    result = generate({"goal": "出附近页原型图", "design_draft": {"increments": ["瓷片"]}})  # type: ignore[arg-type]
+    result = generate(
+        {  # type: ignore[arg-type]
+            "goal": "出附近页原型图",
+            "design_draft": {"increments": ["瓷片"], "components": ["搜索框"]},
+        }
+    )
     draft = result["design_draft"]
     html_path = Path(tmp_path) / "出附近页原型图" / "design.html"
     assert html_path.exists()
     assert "搜索框" in html_path.read_text(encoding="utf-8")
     assert draft["prototype"]["html_path"] == str(html_path)
     assert result["checkpoints"] == ["GENERATE_DONE"]
+    assert "文件：" in str(result.get("chitchat_reply") or "")
 
 
 def test_tool_registered_on_design_agent():
