@@ -2,7 +2,7 @@
  * LangGraph Platform 客户端：创建 thread，再 POST /threads/{id}/runs/stream。
  * 把平台 SSE（updates / messages / end / interrupt）映射成聊天 UI 事件。
  */
-import type { ChatRequest, SSEEvent } from '../types/chat';
+import type { ChatRequest, ResumePayload, SSEEvent } from '../types/chat';
 
 const BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:2024').replace(/\/$/, '');
 const ASSISTANT_ID = import.meta.env.VITE_ASSISTANT_ID ?? 'main_workflow';
@@ -38,29 +38,16 @@ async function ensureThread(threadId?: string): Promise<string> {
   return created.thread_id;
 }
 
-/**
- * 流式运行主工作流：POST /threads/{id}/runs/stream。
- *
- * ``onThreadReady`` 在线程创建/复用后立即回调，使调用方能在流式
- * 开始前就持久化 session_id，避免用户中断后丢失会话上下文。
- */
-export async function streamChat(
-  payload: ChatRequest,
+async function streamRun(
+  threadId: string,
+  body: Record<string, unknown>,
   onEvent: (event: SSEEvent) => void,
   signal?: AbortSignal,
-  onThreadReady?: (threadId: string) => void,
 ): Promise<void> {
-  const threadId = await ensureThread(payload.session_id);
-  // 尽早回传 thread_id，避免等待 done 事件才保存
-  onThreadReady?.(threadId);
   const res = await fetch(`${BASE_URL}/threads/${threadId}/runs/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-    body: JSON.stringify({
-      assistant_id: ASSISTANT_ID,
-      input: { goal: payload.message, scope: payload.scope ?? '' },
-      stream_mode: ['updates', 'messages'],
-    }),
+    body: JSON.stringify(body),
     signal,
   });
 
@@ -86,6 +73,53 @@ export async function streamChat(
       }
     }
   }
+}
+
+/**
+ * 流式运行主工作流：POST /threads/{id}/runs/stream。
+ *
+ * ``onThreadReady`` 在线程创建/复用后立即回调，使调用方能在流式
+ * 开始前就持久化 session_id，避免用户中断后丢失会话上下文。
+ */
+export async function streamChat(
+  payload: ChatRequest,
+  onEvent: (event: SSEEvent) => void,
+  signal?: AbortSignal,
+  onThreadReady?: (threadId: string) => void,
+): Promise<void> {
+  const threadId = await ensureThread(payload.session_id);
+  onThreadReady?.(threadId);
+  await streamRun(
+    threadId,
+    {
+      assistant_id: ASSISTANT_ID,
+      input: { userMessage: payload.message },
+      stream_mode: ['updates', 'messages'],
+    },
+    onEvent,
+    signal,
+  );
+}
+
+/**
+ * 对同一 thread 发送 Command(resume=...)，恢复 interrupt 后的工作流。
+ */
+export async function resumeChat(
+  threadId: string,
+  payload: ResumePayload,
+  onEvent: (event: SSEEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  await streamRun(
+    threadId,
+    {
+      assistant_id: ASSISTANT_ID,
+      command: { resume: payload },
+      stream_mode: ['updates', 'messages'],
+    },
+    onEvent,
+    signal,
+  );
 }
 
 function parseLangGraphFrame(frame: string, threadId: string): SSEEvent[] {
@@ -118,7 +152,9 @@ function mapLangGraphEvent(eventName: string, data: unknown, threadId: string): 
     return [{ type: 'done', session_id: threadId }];
   }
   if (eventName === 'messages' || eventName === 'messages/partial') {
-    const text = extractMessageText(data);
+    // 中间节点的 LLM JSON 会把气泡撑成「思考链」；只放行短路作答节点。
+    if (!isAnswerStreamNode(data)) return [];
+    const text = extractMessageText(streamMessagePayload(data));
     return text ? [{ type: 'token', content: text }] : [];
   }
   if (eventName === 'updates' || eventName === 'data' || eventName === 'events') {
@@ -131,18 +167,46 @@ function mapLangGraphEvent(eventName: string, data: unknown, threadId: string): 
   return text ? [{ type: 'token', content: text }] : [];
 }
 
+const ANSWER_STREAM_NODES = new Set(['chitchat', 'fast_qa']);
+
+function streamMessageMeta(data: unknown): Record<string, unknown> | undefined {
+  if (Array.isArray(data) && data.length >= 2 && isRecord(data[1])) {
+    return data[1];
+  }
+  if (isRecord(data) && isRecord(data.metadata)) {
+    return data.metadata;
+  }
+  return undefined;
+}
+
+function isAnswerStreamNode(data: unknown): boolean {
+  const meta = streamMessageMeta(data);
+  const node = meta && typeof meta.langgraph_node === 'string' ? meta.langgraph_node : '';
+  // 无节点元数据时宁可丢掉中间 token，避免把 classify/producer JSON 拼进回复。
+  return ANSWER_STREAM_NODES.has(node);
+}
+
+function streamMessagePayload(data: unknown): unknown {
+  if (Array.isArray(data) && data.length > 0) return data[0];
+  return data;
+}
+
 function mapUpdates(data: unknown): SSEEvent[] {
   const payload = unwrapUpdate(data);
   if (!isRecord(payload)) return [];
   const events: SSEEvent[] = [];
   for (const [node, value] of Object.entries(payload)) {
     if (node === '__interrupt__') {
-      const prompt = interruptPrompt(value);
-      events.push({ type: 'token', content: prompt });
+      const info = interruptInfo(value);
+      events.push({ type: 'interrupt', prompt: info.prompt, reason: info.reason });
+      events.push({ type: 'token', content: `\n[interrupt] ${info.prompt}\n` });
       continue;
     }
-    // ★ chitchat 短路：将 chitchat_reply 直接作为 token 输出，不走 tool_call
-    if (node === 'chitchat' && isRecord(value) && typeof value.chitchat_reply === 'string') {
+    if (node === 'triage' || node === 'classify' || node === 'mark_decision' || node === 'mark_production' || node === 'execute_produce' || node === 'execute_research') {
+      continue;
+    }
+    // 闲聊 / 简单问答：只推最终回复，不把节点状态当成思考链。
+    if (isRecord(value) && typeof value.chitchat_reply === 'string' && value.chitchat_reply) {
       events.push({ type: 'token', content: value.chitchat_reply });
       continue;
     }
@@ -180,12 +244,17 @@ function extractMessageText(data: unknown): string {
   return '';
 }
 
-function interruptPrompt(value: unknown): string {
+function interruptInfo(value: unknown): { prompt: string; reason?: string } {
   const first = Array.isArray(value) ? value[0] : value;
-  if (isRecord(first) && isRecord(first.value) && typeof first.value.prompt === 'string') {
-    return `\n[interrupt] ${first.value.prompt}\n`;
+  if (isRecord(first) && isRecord(first.value)) {
+    const prompt =
+      typeof first.value.prompt === 'string'
+        ? first.value.prompt
+        : '工作流等待人工确认';
+    const reason = typeof first.value.reason === 'string' ? first.value.reason : undefined;
+    return { prompt, reason };
   }
-  return '\n[interrupt] 工作流等待人工确认，请用 Command(resume=...) 恢复。\n';
+  return { prompt: '工作流等待人工确认，请审批后继续。' };
 }
 
 function stringifyResult(value: unknown): string {

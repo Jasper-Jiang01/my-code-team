@@ -56,7 +56,21 @@ def create_checkpointer(explicit: object | None = None) -> object | None:
         try:
             from langgraph.checkpoint.postgres import PostgresSaver
 
-            saver = PostgresSaver.from_conn_string(postgres_url)
+            # 新版 from_conn_string 多为 context manager；长生命周期进程
+            # 用 __enter__ 取出 saver。优先 ConnectionPool（若已安装）。
+            saver: object | None = None
+            try:
+                from psycopg_pool import ConnectionPool
+
+                pool = ConnectionPool(
+                    conninfo=postgres_url,
+                    kwargs={"autocommit": True, "prepare_threshold": 0},
+                )
+                saver = PostgresSaver(pool)
+            except Exception:
+                cm = PostgresSaver.from_conn_string(postgres_url)
+                saver = cm.__enter__() if hasattr(cm, "__enter__") else cm
+
             setup = getattr(saver, "setup", None)
             if callable(setup):
                 setup()

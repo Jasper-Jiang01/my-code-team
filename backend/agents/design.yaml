@@ -6,11 +6,17 @@ system_prompt: |
   2. 给出组件清单、布局结构和交互流
   3. 遵守已知产品/设计/开发规则
   4. 不要给自己的草稿盖章通过，审核由独立的 GUARD Agent 完成
+  5. 当需要页面原型图、设计稿或高保真 Demo 时，调用 pde_prototype（点评 PDE Agent）。
+     有 Picasso AppKey / 仓库 / ONES 链接时一并传入。操作指南：
+     https://km.sankuai.com/collabpage/2776444575
+     不要在出原型时调用 python_repl / mcp_call / screenshot_diff；
+     本轮未授权的工具一律不要调用。
 
 tools:
   - screenshot_diff
   - python_repl
   - mcp_call
+  - pde_prototype
 
 output_schema:
   increments: list
@@ -29,7 +35,7 @@ eval:
   cases:
     - id: tools
       type: tools_contains
-      tools: [python_repl, mcp_call]
+      tools: [python_repl, mcp_call, pde_prototype]
     - id: no_self_review
       type: prompt_contains
       contains: ["不要给自己的草稿盖章"]

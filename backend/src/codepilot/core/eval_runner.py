@@ -66,7 +66,13 @@ def _check_prompt_forbids(harness: AgentHarness, case: dict[str, Any]) -> str | 
 
 def _check_skills_layout(_harness: AgentHarness, _case: dict[str, Any]) -> str | None:
     skills_dir = _BACKEND_ROOT / "skills"
-    required = ("search_km.py", "query_sql.py", "screenshot_diff.py", "deploy_demo.py")
+    required = (
+        "search_km.py",
+        "query_sql.py",
+        "screenshot_diff.py",
+        "deploy_demo.py",
+        "pde_prototype.py",
+    )
     if not skills_dir.is_dir():
         return f"missing skills directory: {skills_dir}"
     missing = [name for name in required if not (skills_dir / name).exists()]

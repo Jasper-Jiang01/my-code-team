@@ -3,8 +3,11 @@
 import json
 import logging
 
+from langgraph.types import Overwrite
+
 from codepilot.core.agent_loader import invoke_agent
 from codepilot.core.context_views import format_state_context
+from codepilot.core.intent_router import needs_tool
 from codepilot.core.llm_utils import extract_json, safe_content
 from codepilot.core.memory_store import update_agent_memory, update_project_memory
 from codepilot.states.entries import make_fact, make_rule
@@ -59,13 +62,14 @@ def execute_data(state: WorkflowState) -> dict:
     goal = state.get("goal", "")
 
     sql_rows: list[dict] = []
-    try:
-        # 使用参数化查询，避免 SQL 注入；将参数拼接交给 query_sql 工具内部处理。
-        sql = "SELECT metric, value, definition FROM metrics WHERE context = :context"
-        raw_rows = query_sql.invoke({"sql": sql, "params": {"context": goal[:80]}})
-        sql_rows = [row for row in raw_rows if isinstance(row, dict)] if isinstance(raw_rows, list) else []
-    except Exception:  # noqa: BLE001
-        logger.exception("execute_data: query_sql failed")
+    if needs_tool(state, "query_sql"):
+        try:
+            # 使用参数化查询，避免 SQL 注入；将参数拼接交给 query_sql 工具内部处理。
+            sql = "SELECT metric, value, definition FROM metrics WHERE context = :context"
+            raw_rows = query_sql.invoke({"sql": sql, "params": {"context": goal[:80]}})
+            sql_rows = [row for row in raw_rows if isinstance(row, dict)] if isinstance(raw_rows, list) else []
+        except Exception:  # noqa: BLE001
+            logger.exception("execute_data: query_sql failed")
 
     metric_facts = _rows_to_facts(sql_rows, goal)
     rules: list[RuleEntry] = []
@@ -77,7 +81,7 @@ def execute_data(state: WorkflowState) -> dict:
                 context=format_state_context(state, "data"),
                 sql_rows=json.dumps(sql_rows, ensure_ascii=False) if sql_rows else "（暂无）",
             )
-            response = invoke_agent("data", task)
+            response = invoke_agent("data", task, allowed_tools=[])
             result = _parse_data_result(safe_content(response))
             for rule in result.get("rules", []):
                 if isinstance(rule, dict) and rule.get("domain") and rule.get("content"):
@@ -106,8 +110,16 @@ def execute_data(state: WorkflowState) -> dict:
     except Exception:  # noqa: BLE001
         logger.exception("execute_data: failed to persist memory")
 
+    # 重入 DecisionGraph 时清空对抗工作字段，避免旧 round/candidates 残留
+    # 导致 critic 直接 force-pass。upsert 字段用 Overwrite 整表替换。
     return {
         "facts_ledger": metric_facts,
         "rules_ledger": rules,
+        "decision_round": 0,
+        "decision_candidates": Overwrite([]),
+        "decision_shortlist": [],
+        "decision_proposal": None,
+        "decision_critique": None,
+        "decision_verdict": None,
         "checkpoints": ["data_done"],
     }

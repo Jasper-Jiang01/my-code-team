@@ -1,5 +1,6 @@
 """P0/P1 修复的回归测试：证据落盘、台账 upsert、质检回环。"""
 
+from codepilot.core.config import settings
 from codepilot.graphs.production import _after_guard
 from codepilot.nodes.researcher import researcher
 from codepilot.nodes.review_steps import finalize_review, loop_condition
@@ -36,7 +37,9 @@ def test_resolve_issues_only_patches_matching_source():
     assert patches[0]["status"] == "resolved"
 
 
-def test_researcher_persists_km_evidence_instead_of_query_only():
+def test_researcher_persists_km_evidence_instead_of_query_only(monkeypatch):
+    monkeypatch.setattr(settings, "km_search_endpoint", "")
+    monkeypatch.setattr(settings, "km_mis", "")
     result = researcher({"query": "经营周报点击率口径"})
     findings = result["research_findings"]
     assert findings, "search_km fixture should yield evidence"
@@ -46,7 +49,9 @@ def test_researcher_persists_km_evidence_instead_of_query_only():
         assert fact["metric"] == "经营周报点击率口径"
 
 
-def test_search_km_fixture_has_source_url_snippet():
+def test_search_km_fixture_has_source_url_snippet(monkeypatch):
+    monkeypatch.setattr(settings, "km_search_endpoint", "")
+    monkeypatch.setattr(settings, "km_mis", "")
     rows = search_km.invoke({"query": "供给冷启动", "top_k": 2})
     assert len(rows) == 2
     assert rows[0]["source"] == "km_fixture"

@@ -11,7 +11,9 @@ from codepilot.states.workflow_state import (
     QAReport,
     RuleEntry,
     Spec,
+    WorkflowInput,
     WorkflowState,
+    user_text,
 )
 
 __all__ = [
@@ -25,6 +27,7 @@ __all__ = [
     "QAReport",
     "RuleEntry",
     "Spec",
+    "WorkflowInput",
     "WorkflowState",
     "make_fact",
     "make_issue",
@@ -32,4 +35,5 @@ __all__ = [
     "resolve_issues",
     "unique_extend",
     "upsert_by_id",
+    "user_text",
 ]

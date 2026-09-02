@@ -59,7 +59,7 @@ def execute_research(state: WorkflowState) -> dict:
                 known_keywords=project_memory.get("keywords", []),
                 max_queries=_MAX_SEED_QUERIES,
             )
-            response = invoke_agent("research", task)
+            response = invoke_agent("research", task, allowed_tools=[])
             seed_queries = _parse_seed_queries(safe_content(response))
         except Exception:  # noqa: BLE001 - 不能因为研究规划失败而让图崩溃
             logger.exception("execute_research: failed to derive seed queries via LLM")

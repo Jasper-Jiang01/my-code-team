@@ -118,5 +118,11 @@ def test_slice_state_does_not_dump_foreign_ledgers():
 
 def test_skills_directory_exists():
     skills = Path(__file__).resolve().parents[1] / "skills"
-    for name in ("search_km.py", "query_sql.py", "screenshot_diff.py", "deploy_demo.py"):
+    for name in (
+        "search_km.py",
+        "query_sql.py",
+        "screenshot_diff.py",
+        "deploy_demo.py",
+        "pde_prototype.py",
+    ):
         assert (skills / name).exists(), name

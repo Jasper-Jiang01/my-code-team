@@ -63,9 +63,8 @@ def build_problem_discovery_graph() -> CompiledStateGraph:
     builder.add_edge("researcher", "synthesize")
     builder.add_edge("synthesize", END)
 
-    # 子图不设置独立 checkpointer，由主图的 checkpointer 统一管理持久化，
-    # 避免 checkpoint 嵌套冲突。
-    return builder.compile(checkpointer=False)
+    # checkpointer=None：继承父图检查点（与主图同一 thread 持久化）。
+    return builder.compile(checkpointer=None)
 
 
 # 模块级别的已编译子图实例，用于独立测试／组合到主工作流图中。

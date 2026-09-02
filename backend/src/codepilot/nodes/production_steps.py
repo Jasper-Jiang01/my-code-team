@@ -10,7 +10,7 @@
 ``demo_artifact``。
 
 读写：``demo_artifact``（由本子图拥有）。
-使用的工具：``deploy_demo``、``screenshot_diff``、``python_repl``、``mcp_call``。
+使用的工具：``pde_prototype``、``deploy_demo``、``screenshot_diff``、``python_repl``、``mcp_call``。
 """
 
 import html
@@ -21,9 +21,17 @@ from pathlib import Path
 from codepilot.core.agent_loader import invoke_agent
 from codepilot.core.config import settings
 from codepilot.core.context_views import format_state_context
+from codepilot.core.intent_router import needs_tool, resolve_intent
 from codepilot.core.llm_utils import extract_json, safe_content
 from codepilot.states.workflow_state import Demo, WorkflowState
-from codepilot.tools import browser_screenshot, deploy_demo, mcp_call, python_repl, screenshot_diff
+from codepilot.tools import (
+    browser_screenshot,
+    deploy_demo,
+    mcp_call,
+    pde_prototype,
+    python_repl,
+    screenshot_diff,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +113,8 @@ def explore(state: WorkflowState) -> dict:
     )
     result: dict = {}
     try:
-        response = invoke_agent("design", extra)
+        # EXPLORE 只产出 JSON，不绑定生产工具，避免模型误调 pde/mcp。
+        response = invoke_agent("design", extra, allowed_tools=[])
         result = _parse_json(safe_content(response))
     except Exception:  # noqa: BLE001 - 不能因单步失败而中断静态子流程
         logger.exception("explore: failed via LLM")
@@ -118,28 +127,76 @@ def explore(state: WorkflowState) -> dict:
 
 def generate(state: WorkflowState) -> dict:
     """02 GENERATE — 产出设计草稿。"""
+    intent = resolve_intent(state)
     draft = state.get("design_draft") or {}
     audit = state.get("design_audit") or {}
     audit_note = ""
     if audit.get("issues"):
         audit_note = f"上一轮 GUARD 未通过，必须逐条修订：{json.dumps(audit.get('issues'), ensure_ascii=False)}"
+    use_pde = needs_tool(state, "pde_prototype")
     extra = _DESIGN_TASK_TEMPLATE.format(
         context=format_state_context(state, "design"),
         extra_instructions=(
             "基于需求增量，产出高保真设计草稿（组件清单、布局结构、交互流）。"
+            + (
+                "页面原型图/设计稿请调用 pde_prototype（点评 PDE Agent，"
+                "https://km.sankuai.com/collabpage/2776444575）。"
+                if use_pde
+                else "本轮不调用原型或代码工具，只输出 JSON 草稿。"
+            )
             + ((" " + audit_note) if audit_note else "")
         ),
         json_schema='{"components": ["组件1"], "layout": "...", "interactions": ["流1"]}',
     )
     try:
-        response = invoke_agent("design", extra)
+        response = invoke_agent(
+            "design",
+            extra,
+            allowed_tools=["pde_prototype"] if use_pde else [],
+        )
         parsed = _parse_json(safe_content(response))
         if parsed:
             draft = {**draft, **parsed}
     except Exception:  # noqa: BLE001
         logger.exception("generate: failed via LLM")
 
-    _export_design_html(_artifact_dir(state.get("goal", "demo")), state.get("goal", "demo"), draft)
+    goal = state.get("goal", "demo")
+    artifact_dir = _artifact_dir(goal)
+    proto: dict = {}
+    if use_pde:
+        try:
+            proto = pde_prototype.invoke(
+                {
+                    "requirement": goal,
+                    "page_name": str(goal or "页面原型")[:40],
+                    "components": list(draft.get("components") or []),
+                    "stage": intent.pde_stage or "design",
+                    "output_dir": str(artifact_dir),
+                }
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("generate: pde_prototype failed")
+            proto = {}
+
+    if proto:
+        if proto.get("components") and not draft.get("components"):
+            draft["components"] = list(proto.get("components") or [])
+        if proto.get("layout") and not draft.get("layout"):
+            draft["layout"] = str(proto.get("layout") or "")
+        if proto.get("interactions") and not draft.get("interactions"):
+            draft["interactions"] = list(proto.get("interactions") or [])
+        draft["prototype"] = {
+            "mode": proto.get("mode"),
+            "html_path": proto.get("html_path"),
+            "task_url": proto.get("task_url"),
+            "launch": proto.get("launch"),
+            "playbook": proto.get("playbook"),
+            "unverified": proto.get("unverified"),
+        }
+
+    html_path = Path(str(proto.get("html_path") or ""))
+    if not html_path.exists() and (use_pde or needs_tool(state, "python_repl")):
+        _export_design_html(artifact_dir, goal, draft)
     return {"production_step": _STEP_GENERATE, "design_draft": draft, "checkpoints": ["GENERATE_DONE"]}
 
 
@@ -193,52 +250,59 @@ def build(state: WorkflowState) -> dict:
     artifact_path = str(artifact_dir / "build.zip")
     components = list(draft.get("components") or [])
     title = html.escape((goal or "Demo")[:80])
+    design_html = artifact_dir / "design.html"
 
     mcp_catalog: dict = {}
-    try:
-        mcp_catalog = mcp_call.invoke({"method": "tools/list"})
-    except Exception:  # noqa: BLE001
-        logger.exception("build: mcp_call tools/list failed")
+    if needs_tool(state, "mcp_call"):
+        try:
+            mcp_catalog = mcp_call.invoke({"method": "tools/list"})
+        except Exception:  # noqa: BLE001
+            logger.exception("build: mcp_call tools/list failed")
 
-    escaped_components = [html.escape(str(item)) for item in components[:20]]
-    page_html = (
-        "<!doctype html><html><head><meta charset='utf-8'><title>"
-        f"{title}</title></head><body><h1>{title}</h1><ul>"
-        + "".join(f"<li>{item}</li>" for item in escaped_components)
-        + "</ul></body></html>"
-    )
-    repl_code = (
-        "page_html = " + json.dumps(page_html, ensure_ascii=False) + "\n"
-        "f = open('index.html', 'w')\n"
-        "f.write(page_html)\n"
-        "f.close()\n"
-        "result = 'index.html'\n"
-    )
+    if design_html.exists():
+        page_html = design_html.read_text(encoding="utf-8")
+    else:
+        escaped_components = [html.escape(str(item)) for item in components[:20]]
+        page_html = (
+            "<!doctype html><html><head><meta charset='utf-8'><title>"
+            f"{title}</title></head><body><h1>{title}</h1><ul>"
+            + "".join(f"<li>{item}</li>" for item in escaped_components)
+            + "</ul></body></html>"
+        )
     repl_result: dict = {}
-    try:
-        repl_result = python_repl.invoke({"code": repl_code, "workdir": str(artifact_dir)})
-    except Exception:  # noqa: BLE001
-        logger.exception("build: python_repl failed")
-        repl_result = {"ok": False}
+    if needs_tool(state, "python_repl"):
+        repl_code = (
+            "page_html = " + json.dumps(page_html, ensure_ascii=False) + "\n"
+            "f = open('index.html', 'w')\n"
+            "f.write(page_html)\n"
+            "f.close()\n"
+            "result = 'index.html'\n"
+        )
+        try:
+            repl_result = python_repl.invoke({"code": repl_code, "workdir": str(artifact_dir)})
+        except Exception:  # noqa: BLE001
+            logger.exception("build: python_repl failed")
+            repl_result = {"ok": False}
 
     deploy_result: dict = {}
-    try:
-        deploy_result = deploy_demo.invoke(
-            {
-                "artifact_path": artifact_path,
-                "environment": "staging",
-                "manifest": {
-                    "goal": goal,
-                    "spec": state.get("spec"),
-                    "design_draft": draft,
-                    "design_audit": state.get("design_audit"),
-                    "mcp": mcp_catalog,
-                    "repl": repl_result,
-                },
-            }
-        )
-    except Exception:  # noqa: BLE001
-        logger.exception("build: deploy_demo failed")
+    if needs_tool(state, "deploy_demo"):
+        try:
+            deploy_result = deploy_demo.invoke(
+                {
+                    "artifact_path": artifact_path,
+                    "environment": "staging",
+                    "manifest": {
+                        "goal": goal,
+                        "spec": state.get("spec"),
+                        "design_draft": draft,
+                        "design_audit": state.get("design_audit"),
+                        "mcp": mcp_catalog,
+                        "repl": repl_result,
+                    },
+                }
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("build: deploy_demo failed")
 
     build_artifact = {
         "artifact_path": artifact_path,
@@ -335,8 +399,30 @@ def verify(state: WorkflowState) -> dict:
     checkpoint = "VISUAL_PASS" if visual_pass else "VISUAL_UNVERIFIED"
     if not audit.get("approved"):
         checkpoint = "GUARD_FORCED_BUILD"
-    return {
+    updates: dict = {
         "production_step": _STEP_VERIFY,
         "demo_artifact": demo,
         "checkpoints": [checkpoint, "PRODUCE_DONE"],
     }
+    intent = resolve_intent(state)
+    if intent.kind in {"prototype", "spec", "code"}:
+        proto = (state.get("design_draft") or {}).get("prototype") or {}
+        html_path = str(proto.get("html_path") or "")
+        url = str(build_artifact.get("url") or "")
+        if intent.kind == "prototype":
+            updates["chitchat_reply"] = (
+                f"已按需求产出页面原型。\n文件：{html_path or _artifact_dir(state.get('goal', 'demo'))}"
+                "\n操作指南：https://km.sankuai.com/collabpage/2776444575"
+            )
+        elif intent.kind == "spec":
+            updates["chitchat_reply"] = (
+                f"已按需求整理需求规格/原型（stage={intent.pde_stage or 'requirements'}）。"
+                + (f"\n文件：{html_path}" if html_path else "")
+            )
+        else:
+            updates["chitchat_reply"] = (
+                "已完成本轮代码实现。"
+                + (f"\nDemo：{url}" if url else "")
+                + (f"\n产物：{demo.get('artifact_path', '')}" if demo.get("artifact_path") else "")
+            )
+    return updates

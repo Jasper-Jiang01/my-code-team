@@ -6,8 +6,9 @@ import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from codepilot.core.create_model import create_chat_model
+from codepilot.core.intent_router import resolve_intent
 from codepilot.core.llm_utils import extract_json, safe_content
-from codepilot.states.workflow_state import WorkflowState
+from codepilot.states.workflow_state import WorkflowState, user_text
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,9 @@ _CLASSIFIER_SYSTEM_PROMPT = """\
 你是多 Agent 工作流的调度中心（Orchestrator）。你的唯一职责是判断任务当前应该
 从下列四个阶段的哪一个进入，四个阶段严格按顺序执行：research -> data -> \
 produce -> qa。
+
+这是「完整 Demo / 端到端」任务的续跑判断，不要因为台账为空就把
+「出原型图 / 写需求 / 实现代码 / 查口径」误判进整条链。
 
 判断依据：
 - 如果目标（goal）缺乏事实依据、尚未研究过背景信息，或 facts_ledger 为空，选择 "research"。
@@ -32,7 +36,7 @@ produce -> qa。
 def _build_classification_context(state: WorkflowState) -> str:
     return json.dumps(
         {
-            "goal": state.get("goal", ""),
+            "goal": user_text(state),
             "scope": state.get("scope", ""),
             "has_facts": bool(state.get("facts_ledger")),
             "has_spec": bool(state.get("spec")),
@@ -66,9 +70,18 @@ def classify_task(state: WorkflowState) -> dict:
     Returns:
         包含更新后 next_step 的字典。
     """
-    goal = state.get("goal", "")
+    goal = user_text(state)
     if not goal:
         return {"next_step": "research"}
+
+    intent = resolve_intent(state)
+    if intent.kind != "full" and intent.entry in _VALID_STEPS:
+        return {
+            "next_step": intent.entry,
+            "task_intent": intent.kind,
+            "needed_tools": list(intent.tools),
+            "pde_stage": intent.pde_stage,
+        }
 
     try:
         # 分类节点是轻量调用，缩短超时与重试避免拖累主流程

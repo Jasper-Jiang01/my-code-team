@@ -15,6 +15,7 @@
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from codepilot.core.intent_router import resolve_intent
 from codepilot.nodes import (
     build,
     compare,
@@ -27,6 +28,33 @@ from codepilot.nodes import (
 from codepilot.states.workflow_state import WorkflowState
 
 _MAX_GUARD_ROUNDS = 2
+
+
+def _after_init(state: WorkflowState) -> str:
+    """按意图跳过用不到的生产步骤：出原型不必先 EXPLORE，写代码可从 BUILD 起。"""
+    intent = resolve_intent(state)
+    if intent.kind == "code" and "pde_prototype" not in intent.tools:
+        return "build"
+    if intent.kind in {"prototype", "spec", "code"}:
+        return "generate"
+    return "explore"
+
+
+def _after_generate(state: WorkflowState) -> str:
+    """原型 / 需求文档在 GENERATE 后收口；写代码跳过 GUARD 直接 BUILD。"""
+    kind = resolve_intent(state).kind
+    if kind in {"prototype", "spec"}:
+        return "verify"
+    if kind == "code":
+        return "build"
+    return "guard"
+
+
+def _after_build(state: WorkflowState) -> str:
+    """没有视觉比对工具时跳过 COMPARE。"""
+    if "screenshot_diff" in resolve_intent(state).tools:
+        return "compare"
+    return "verify"
 
 
 def _after_guard(state: WorkflowState) -> str:
@@ -53,21 +81,32 @@ def build_production_graph() -> CompiledStateGraph:
     builder.add_node("verify", verify)
 
     builder.set_entry_point("execute_produce")
-    builder.add_edge("execute_produce", "explore")
+    builder.add_conditional_edges(
+        "execute_produce",
+        _after_init,
+        {"explore": "explore", "generate": "generate", "build": "build"},
+    )
     builder.add_edge("explore", "generate")
-    builder.add_edge("generate", "guard")
+    builder.add_conditional_edges(
+        "generate",
+        _after_generate,
+        {"guard": "guard", "build": "build", "verify": "verify"},
+    )
     builder.add_conditional_edges(
         "guard",
         _after_guard,
         {"build": "build", "generate": "generate"},
     )
-    builder.add_edge("build", "compare")
+    builder.add_conditional_edges(
+        "build",
+        _after_build,
+        {"compare": "compare", "verify": "verify"},
+    )
     builder.add_edge("compare", "verify")
     builder.add_edge("verify", END)
 
-    # 子图不设置独立 checkpointer，由主图的 checkpointer 统一管理持久化，
-    # 避免 checkpoint 嵌套冲突。
-    return builder.compile(checkpointer=False)
+    # checkpointer=None：继承父图检查点（与主图同一 thread 持久化）。
+    return builder.compile(checkpointer=None)
 
 
 graph = build_production_graph()

@@ -489,6 +489,56 @@ button { font-family: inherit; }
   font-size: 0.8125rem; // 13px
 }
 
+.interrupt-banner {
+  max-width: $content-max-width;
+  margin: 0 auto 0.5rem;
+  padding: 0.75rem 1rem;
+  background: #f8fafc;
+  color: $text-primary;
+  border: 1px solid $border-strong;
+  border-radius: 0.625rem;
+  font-size: 0.8125rem;
+}
+
+.interrupt-prompt {
+  color: $text-secondary;
+  line-height: 1.5;
+  margin-bottom: 0.75rem;
+}
+
+.interrupt-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.btn-approve,
+.btn-reject {
+  border: none;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.875rem;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.btn-approve {
+  background: $brand;
+  color: #fff;
+
+  &:hover {
+    background: $brand-hover;
+  }
+}
+
+.btn-reject {
+  background: $bg-hover;
+  color: $text-primary;
+
+  &:hover {
+    background: darken($bg-hover, 4%);
+  }
+}
+
 // ---------- 输入区：悬浮卡片式，仿 DeepSeek ----------
 .chat-input-wrap {
   flex-shrink: 0;

@@ -2,9 +2,11 @@
 
 from pathlib import Path
 
+from langgraph.types import Command
+
 from codepilot.graphs.decision import build_decision_graph
 from codepilot.graphs.main_workflow import build_main_workflow
-from codepilot.nodes.loop_control import route_after_qa
+from codepilot.nodes.loop_control import after_qa, route_after_qa
 from codepilot.nodes.tournament import filter_candidates, tournament
 from codepilot.states.entries import make_fact
 from codepilot.states.fingerprints import fingerprint_facts, fingerprint_spec
@@ -26,6 +28,7 @@ def test_route_after_qa_reruns_data_when_facts_change():
         "last_decided_facts_fp": "old",
         "last_produced_spec_fp": fingerprint_spec({"goal": "g", "scope": "s", "constraints": []}),
         "loop_rerun_count": 0,
+        "qa_reopen_target": "",
     }
     assert route_after_qa(state) == "data"  # type: ignore[arg-type]
 
@@ -39,6 +42,7 @@ def test_route_after_qa_reruns_produce_when_spec_changes():
         "last_decided_facts_fp": fingerprint_facts(facts),
         "last_produced_spec_fp": "old-spec",
         "loop_rerun_count": 0,
+        "qa_reopen_target": "",
     }
     assert route_after_qa(state) == "produce"  # type: ignore[arg-type]
 
@@ -52,6 +56,7 @@ def test_route_after_qa_confirms_when_fingerprints_match():
         "last_decided_facts_fp": fingerprint_facts(facts),
         "last_produced_spec_fp": fingerprint_spec(spec),
         "loop_rerun_count": 0,
+        "qa_reopen_target": "",
     }
     assert route_after_qa(state) == "human_confirm"  # type: ignore[arg-type]
 
@@ -62,8 +67,72 @@ def test_route_after_qa_stops_at_max_reruns():
         "spec": {"goal": "g", "scope": "s", "constraints": []},
         "last_decided_facts_fp": "stale",
         "loop_rerun_count": 2,
+        "qa_reopen_target": "data",
     }
     assert route_after_qa(state) == "human_confirm"  # type: ignore[arg-type]
+
+
+def test_route_after_qa_prefers_explicit_reopen_target():
+    facts = [make_fact(source="km", metric="gmv", value="1")]
+    spec = {"goal": "g", "scope": "s", "constraints": []}
+    state = {
+        "facts_ledger": facts,
+        "spec": spec,
+        "last_decided_facts_fp": fingerprint_facts(facts),
+        "last_produced_spec_fp": fingerprint_spec(spec),
+        "loop_rerun_count": 0,
+        "qa_reopen_target": "produce",
+    }
+    assert route_after_qa(state) == "produce"  # type: ignore[arg-type]
+
+
+def test_route_after_qa_skips_fingerprint_when_snapshot_empty():
+    """classify 直达 qa 时 last_*_fp 为空，不得误触发 rerun。"""
+    facts = [make_fact(source="km", metric="gmv", value="1")]
+    spec = {"goal": "g", "scope": "s", "constraints": []}
+    state = {
+        "facts_ledger": facts,
+        "spec": spec,
+        "last_decided_facts_fp": "",
+        "last_produced_spec_fp": "",
+        "loop_rerun_count": 0,
+        "qa_reopen_target": "",
+    }
+    assert route_after_qa(state) == "human_confirm"  # type: ignore[arg-type]
+
+
+def test_after_qa_command_clears_target_and_increments_count():
+    cmd = after_qa(  # type: ignore[arg-type]
+        {
+            "qa_reopen_target": "data",
+            "loop_rerun_count": 0,
+            "facts_ledger": [],
+            "spec": None,
+            "last_decided_facts_fp": "",
+            "last_produced_spec_fp": "",
+        }
+    )
+    assert isinstance(cmd, Command)
+    assert cmd.goto == "data"
+    assert cmd.update == {"qa_reopen_target": "", "loop_rerun_count": 1}
+
+
+def test_after_qa_command_to_human_confirm_clears_target():
+    facts = [make_fact(source="km", metric="gmv", value="1")]
+    spec = {"goal": "g", "scope": "s", "constraints": []}
+    cmd = after_qa(  # type: ignore[arg-type]
+        {
+            "qa_reopen_target": "",
+            "loop_rerun_count": 0,
+            "facts_ledger": facts,
+            "spec": spec,
+            "last_decided_facts_fp": fingerprint_facts(facts),
+            "last_produced_spec_fp": fingerprint_spec(spec),
+        }
+    )
+    assert isinstance(cmd, Command)
+    assert cmd.goto == "human_confirm"
+    assert cmd.update == {"qa_reopen_target": ""}
 
 
 def test_tournament_prefers_proposal_with_more_constraints():
@@ -110,13 +179,14 @@ def test_python_repl_rejects_import():
 def test_mcp_lists_local_tools():
     catalog = mcp_call.invoke({"method": "tools/list"})
     names = {item["name"] for item in catalog["tools"]}
-    assert {"python_repl", "deploy_demo", "query_sql"} <= names
+    assert {"python_repl", "deploy_demo", "query_sql", "pde_prototype"} <= names
 
 
 def test_graphs_compile_with_new_nodes():
     main = build_main_workflow()
     assert "mark_decision" in main.nodes
     assert "mark_production" in main.nodes
+    assert "after_qa" in main.nodes
     decision = build_decision_graph()
     assert "tournament" in decision.nodes
     assert "candidate_producer" in decision.nodes

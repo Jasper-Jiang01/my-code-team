@@ -13,7 +13,7 @@ import uuid
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import yaml
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -29,6 +29,7 @@ from codepilot.tools import (
     browser_screenshot,
     deploy_demo,
     mcp_call,
+    pde_prototype,
     python_repl,
     query_sql,
     screenshot_diff,
@@ -52,6 +53,7 @@ _TOOL_REGISTRY: dict[str, BaseTool] = {
     "vector_memory": vector_memory,
     "python_repl": python_repl,
     "mcp_call": mcp_call,
+    "pde_prototype": pde_prototype,
 }
 
 # backend/ 根目录，即 src/codepilot/ 的上级目录
@@ -90,6 +92,14 @@ class AgentHarness:
                 )
             resolved.append(tool_obj)
         return resolved
+
+
+def _filter_tools(tools: list[BaseTool], allowed_tools: Sequence[str] | None) -> list[BaseTool]:
+    """只保留白名单里的工具；``None`` 表示不裁剪，空列表表示本轮不绑定工具。"""
+    if allowed_tools is None:
+        return tools
+    allow = {name for name in allowed_tools if name}
+    return [tool for tool in tools if tool.name in allow]
 
 
 def _resolve_yaml_path(harness_ref: str) -> Path:
@@ -168,6 +178,7 @@ def build_agent_runnable(
     harness_ref: str,
     model_name: str | None = None,
     model: BaseChatModel | None = None,
+    allowed_tools: Sequence[str] | None = None,
 ) -> Runnable:
     """构建一个绑定了 Agent Harness 工具的 Runnable 对话模型。
 
@@ -177,6 +188,7 @@ def build_agent_runnable(
             如果提供了 ``model``，则忽略此参数。
         model: 可复用的预先构建好的对话模型实例（例如避免每次
             节点调用都重新实例化客户端）。
+        allowed_tools: 本轮允许绑定的工具名；``None`` 使用 Harness 全量。
 
     Returns:
         一个 Runnable，给定输入消息列表后，返回一个可能包含工具调用的
@@ -185,7 +197,7 @@ def build_agent_runnable(
     """
     harness = load_agent_harness(harness_ref)
     chat_model = model or create_chat_model(model_name)
-    tools = harness.tools
+    tools = _filter_tools(harness.tools, allowed_tools)
     return chat_model.bind_tools(tools) if tools else chat_model
 
 
@@ -316,6 +328,7 @@ def invoke_agent(
     user_input: str,
     model_name: str | None = None,
     model: BaseChatModel | None = None,
+    allowed_tools: Sequence[str] | None = None,
 ) -> Any:
     """端到端调用一个 Agent Harness，并在有工具时跑完 tool-call 循环。
 
@@ -329,13 +342,19 @@ def invoke_agent(
         user_input: 用户/任务消息内容。
         model_name: 可选的模型标识符。
         model: 可复用的预先构建好的对话模型实例。
+        allowed_tools: 本轮允许调用的工具名；用于按需求裁剪 Harness 工具集。
 
     Returns:
         底层对话模型返回的最终 AIMessage。
     """
     harness = load_agent_harness(harness_ref)
     chat_model = model or create_chat_model(model_name)
-    runnable = build_agent_runnable(harness_ref, model_name=model_name, model=chat_model)
+    runnable = build_agent_runnable(
+        harness_ref,
+        model_name=model_name,
+        model=chat_model,
+        allowed_tools=allowed_tools,
+    )
     memory = {}
     try:
         memory = load_agent_memory(harness.name)
@@ -352,7 +371,7 @@ def invoke_agent(
         SystemMessage(content=harness.system_prompt),
         HumanMessage(content=content),
     ]
-    tools = harness.tools
+    tools = _filter_tools(harness.tools, allowed_tools)
     if tools:
         response = _run_tool_loop(runnable, tools, messages)
     else:

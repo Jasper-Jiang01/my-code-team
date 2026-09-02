@@ -8,9 +8,11 @@ from codepilot.nodes.execute_produce import execute_produce
 from codepilot.nodes.execute_qa import execute_qa
 from codepilot.nodes.execute_research import execute_research
 from codepilot.nodes.execute_review import execute_review
+from codepilot.nodes.fast_qa import fast_qa
 from codepilot.nodes.human_confirm import human_confirm
 from codepilot.nodes.judge import judge
 from codepilot.nodes.loop_control import (
+    after_qa,
     mark_decision_snapshot,
     mark_production_snapshot,
     route_after_qa,
@@ -35,7 +37,7 @@ from codepilot.nodes.review_steps import (
     review_fan_out,
     visual_gate,
 )
-from codepilot.nodes.route_task import route_task
+from codepilot.nodes.route_task import route_after_decision, route_after_production, route_after_research, route_task
 from codepilot.nodes.synthesize_results import synthesize_results
 from codepilot.nodes.tournament import (
     candidate_producer,
@@ -43,8 +45,10 @@ from codepilot.nodes.tournament import (
     filter_candidates,
     tournament,
 )
+from codepilot.nodes.triage import triage
 
 __all__ = [
+    "after_qa",
     "build",
     "chitchat",
     "classify_task",
@@ -56,6 +60,7 @@ __all__ = [
     "execute_research",
     "execute_review",
     "explore",
+    "fast_qa",
     "finalize_review",
     "fix_agent",
     "function_gate",
@@ -72,9 +77,13 @@ __all__ = [
     "researcher",
     "review_fan_out",
     "route_after_qa",
+    "route_after_decision",
+    "route_after_production",
+    "route_after_research",
     "route_task",
     "synthesize_results",
     "tournament",
+    "triage",
     "candidate_producer",
     "fan_out_candidates",
     "filter_candidates",

@@ -25,11 +25,13 @@ def _local_catalog() -> list[dict[str, str]]:
         {"name": "search_km", "description": "内部知识检索"},
         {"name": "query_sql", "description": "只读 SQL 取数"},
         {"name": "vector_memory", "description": "项目向量记忆"},
+        {"name": "pde_prototype", "description": "点评 PDE 页面原型图"},
     ]
 
 
 def _dispatch_local(name: str, arguments: dict[str, Any]) -> Any:
     from codepilot.tools.deploy_demo import deploy_demo
+    from codepilot.tools.pde_prototype import pde_prototype
     from codepilot.tools.python_repl import python_repl
     from codepilot.tools.query_sql import query_sql
     from codepilot.tools.screenshot_diff import screenshot_diff
@@ -43,6 +45,7 @@ def _dispatch_local(name: str, arguments: dict[str, Any]) -> Any:
         "search_km": search_km,
         "query_sql": query_sql,
         "vector_memory": vector_memory,
+        "pde_prototype": pde_prototype,
     }
     tool_obj = registry.get(name)
     if tool_obj is None:

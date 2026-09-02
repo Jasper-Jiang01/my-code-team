@@ -1,6 +1,8 @@
 """所有 Agent 和图共享的全局工作流状态。"""
 
-from typing import Annotated, TypedDict
+from typing import Annotated, Any, Mapping, TypedDict
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from codepilot.states.reducers import last_write_wins, unique_extend, upsert_by_id
 
@@ -69,10 +71,38 @@ class QAReport(TypedDict):
     issues: list[IssueEntry]
 
 
+class WorkflowInput(BaseModel):
+    """LangSmith / Studio / API 入口：只需一段用户文字。
+
+    内部状态总线仍使用 ``goal``；入口节点会把 ``userMessage`` 写入 ``goal``。
+    兼容旧调用 ``{"goal": "..."}``，不把它暴露为必填项。
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    userMessage: str = Field(description="用户输入，纯文本即可")
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_goal_alias(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        message = data.get("userMessage")
+        if message is None or (isinstance(message, str) and not message.strip()):
+            message = data.get("goal") or ""
+        return {"userMessage": str(message)}
+
+
+def user_text(state: Mapping[str, Any]) -> str:
+    """读取入口文字：优先 ``userMessage``，其次 ``goal``。"""
+    return str(state.get("userMessage") or state.get("goal") or "").strip()
+
+
 class WorkflowState(TypedDict):
     """贯穿所有工作流阶段的全局状态总线。"""
 
     # 目标与约束
+    userMessage: str
     goal: str
     scope: str
     constraints: Annotated[list[str], unique_extend]
@@ -93,8 +123,13 @@ class WorkflowState(TypedDict):
     checkpoints: Annotated[list[str], unique_extend]
     next_step: str
     human_confirm: bool | None
-    # chitchat 短路节点的回复文本（简单对话直接输出，不走完整流水线）
+    # 短路回复：闲聊模板或简单问答，不走完整流水线
     chitchat_reply: str
+
+    # 本轮需求意图与工具白名单（由 triage 写入，节点按此调用工具）
+    task_intent: str
+    needed_tools: list[str]
+    pde_stage: str
 
     # QA / 修复阶段显式回写的重跑目标。当 fix_agent 判定问题属于
     # “事实缺失”时为 "data"，属于“规格缺陷”时为 "produce"，

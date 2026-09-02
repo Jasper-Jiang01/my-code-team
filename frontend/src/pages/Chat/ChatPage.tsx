@@ -6,7 +6,7 @@ import { useChat } from '../../hooks/useChat';
 
 /** 聊天页面：侧边栏 + 消息列表自动滚底 + 流式渲染 + 错误提示（DeepSeek 风格）。 */
 export function ChatPage() {
-  const { messages, streaming, error, send, stop } = useChat();
+  const { messages, streaming, error, pendingInterrupt, send, resume, stop } = useChat();
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   // 是否在本次流式开始前用户处于"接近底部"的位置；若用户主动上滑查看
@@ -80,7 +80,7 @@ export function ChatPage() {
           {streaming && (
             <div className="streaming-hint">
               <span className="dot-flashing" />
-              思考中…
+              处理中…
             </div>
           )}
           <div ref={bottomRef} />
@@ -88,8 +88,35 @@ export function ChatPage() {
 
         {error && <div className="error-banner">{error}</div>}
 
+        {pendingInterrupt && !streaming && (
+          <div className="interrupt-banner">
+            <div className="interrupt-prompt">{pendingInterrupt.prompt}</div>
+            <div className="interrupt-actions">
+              <button
+                type="button"
+                className="btn-approve"
+                onClick={() => resume({ approved: true, comment: 'UI 确认通过' })}
+              >
+                通过并继续
+              </button>
+              <button
+                type="button"
+                className="btn-reject"
+                onClick={() => resume({ approved: false, comment: 'UI 驳回' })}
+              >
+                驳回
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="chat-input-wrap">
-          <ChatInput disabled={streaming} streaming={streaming} onSend={send} onStop={stop} />
+          <ChatInput
+            disabled={streaming || !!pendingInterrupt}
+            streaming={streaming}
+            onSend={send}
+            onStop={stop}
+          />
           <div className="disclaimer">内容由 AI 生成，请仔细甄别</div>
         </div>
       </div>

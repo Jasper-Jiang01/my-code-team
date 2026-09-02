@@ -65,9 +65,8 @@ def build_decision_graph() -> CompiledStateGraph:
     builder.add_edge("producer", "critic")
     builder.add_edge("judge", END)
 
-    # 子图不设置独立 checkpointer，由主图的 checkpointer 统一管理持久化，
-    # 避免 checkpoint 嵌套冲突。
-    return builder.compile(checkpointer=False)
+    # checkpointer=None：继承父图检查点（与主图同一 thread 持久化）。
+    return builder.compile(checkpointer=None)
 
 
 graph = build_decision_graph()
