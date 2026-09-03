@@ -1,0 +1,19 @@
+# CatPaw 部署配置 — CodePilot FastAPI（主图 BFF）
+# Plus 构建工具选 virtualenv（无 root，与仓库 uv/hatchling 开发结构兼容）。
+# LONGCAT_API_KEY 等密钥走 Plus 环境变量注入，不要提交 .env。
+type: cloudnative
+python: "3.12"
+build:
+  tools:
+    rust: "1.85.0"
+    libjpeg-turbo-devel: "1.5.3"
+repo: https://git.sankuai.com/~jiangwenzhe02/jingwai-agent-main.git
+branch: master
+cmd:
+  - pip install -r requirements.txt
+target:
+  - ./
+runCmd:
+  - python server.py
+ports:
+  - 8000
