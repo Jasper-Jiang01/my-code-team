@@ -41,6 +41,39 @@ fi
 cp "$ROOT/deploy/requirements.txt" "$DEST/requirements.txt"
 cp "$ROOT/deploy/catpaw_deploy.yaml" "$DEST/.catpaw/catpaw_deploy.yaml"
 
+# 平台从仓库根 manifest.yaml 读取构建工具链（.catpaw/catpaw_deploy.yaml 的
+# build.tools 不随部署工具生成的外部清单传递，2026-09-08 实测仅在其中声明
+# gcc-c++ 时容器内仍无 C++ 编译器，contourpy 回退 sdist 编译直接失败）。
+# 工具链为兜底：requirements.txt 已把全部 native 依赖钉死为预编译 wheel，
+# 正常构建不应触发任何源码编译（CentOS 7 的 gcc 4.8.5 也不支持现代 meson
+# 要求的 C++17）。修改工具链时同步更新 deploy/catpaw_deploy.yaml。
+cat > "$DEST/manifest.yaml" <<'EOF'
+# CloudNative 构建清单 — CodePilot FastAPI（主图 BFF）
+type: cloudnative
+projectID: jiangwenzhe02-codepilot
+python: "3.12"
+
+build:
+  tools:
+    gcc: "4.8.5"
+    gcc-c++: "4.8.5"
+    ninja: "1.10.2"
+    rust: "1.85.0"
+    cargo: "1.85.0"
+    libjpeg-turbo-devel: "1.5.3"
+  cmd:
+    - pip install -i https://pypi.sankuai.com/simple/ --trusted-host pypi.sankuai.com -r requirements.txt
+
+target:
+  - ./
+
+runCmd:
+  - python server.py
+
+ports:
+  - 8000
+EOF
+
 # 骨架仓遗留的境外 Demo 与瘦身前目录，避免和 CodePilot 入口混在一起。
 # skills 例外：baa-basic 分析 skill（backend/skills/data_analyze）需要随仓发布，
 # 供线上 ba_agent_analysis 工具调用其 scripts/call_ba_agent.py。

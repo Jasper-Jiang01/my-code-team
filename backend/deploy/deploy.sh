@@ -75,7 +75,7 @@ precheck() {
   # .env 在白名单内：本仓为个人测试仓，密钥随仓提交（CloudNative 无环境变量注入）。
   local suspicious
   suspicious="$(git -C "$DEST" status --porcelain | cut -c4- \
-    | grep -vE '^(src/|skills/|frontend/|checkpoints/|agent/|server\.py|requirements\.txt|\.env|\.env\.example|package\.json|README\.md|\.gitignore|\.catpaw/)' || true)"
+    | grep -vE '^(src/|skills/|frontend/|checkpoints/|agent/|server\.py|requirements\.txt|manifest\.yaml|\.env|\.env\.example|package\.json|README\.md|\.gitignore|\.catpaw/)' || true)"
   if [ -n "$suspicious" ]; then
     die "发布仓存在同步范围之外的未提交改动（可能为用户手改，同步会覆盖它们）：
 $suspicious
@@ -111,6 +111,14 @@ validate() {
     || die "部署配置 repo 字段缺失或不正确（应为发布仓的 SSH 地址，不可用 HTTPS）"
   grep -q '^branch: master$' "$yaml" || die "部署配置 branch 不是 master"
   grep -q 'python server.py' "$yaml" || die "runCmd 缺少 python server.py"
+
+  # 平台从发布仓根 manifest.yaml 读取构建工具链（2026-09-08 实测：仅在
+  # .catpaw/catpaw_deploy.yaml 声明 gcc-c++ 时容器内仍无 C++ 编译器，
+  # contourpy 回退 sdist 编译报 meson Unknown compiler）。
+  local manifest="$DEST/manifest.yaml"
+  [ -f "$manifest" ] || die "缺少 $manifest（平台按它安装构建工具链）"
+  grep -q 'gcc-c++' "$manifest" || die "manifest.yaml 未声明 gcc-c++（CentOS 7 默认无 C++ 编译器）"
+  grep -q 'python server.py' "$manifest" || die "manifest.yaml 缺少 python server.py"
   awk '/^ports:/{getline; print; exit}' "$yaml" | grep -Eq '^[[:space:]]*- 8000[[:space:]]*$' \
     || die "ports 首个端口不是 8000"
   if sed -n '/^cmd:/,/^target:/p' "$yaml" | grep -q 'npm'; then

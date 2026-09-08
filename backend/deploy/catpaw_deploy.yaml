@@ -12,15 +12,19 @@ projectID: jiangwenzhe02-codepilot
 python: "3.12"
 build:
   tools:
+    gcc: "4.8.5"
+    gcc-c++: "4.8.5"
     rust: "1.85.0"
     cargo: "1.85.0"
-    gcc-c++: "4.8.5"
     ninja: "1.10.2"
     libjpeg-turbo-devel: "1.5.3"
 repo: ssh://git@git.sankuai.com/~jiangwenzhe02/jingwai-agent-main.git
 branch: master
 # 依赖已在 requirements.txt 全部钉死为内网 PyPI 提供预编译 wheel 的版本；
 # 不传 --only-binary（其值曾破坏平台生成的外部清单）。
+# 注意：本文件的 build.tools 不一定随部署工具生成的外部清单传递（2026-09-08
+# 实测仅声明 gcc-c++ 时容器内仍无 C++ 编译器），同步脚本会在发布仓根额外
+# 生成 manifest.yaml 声明同一套工具链；根治手段仍是 requirements.txt 全 wheel 锁定。
 cmd:
   - pip install -i https://pypi.sankuai.com/simple/ --trusted-host pypi.sankuai.com -r requirements.txt
 target:

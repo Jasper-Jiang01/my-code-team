@@ -28,6 +28,10 @@ description: 将 CodePilot 的前后端一体化版本同步、提交并部署�
    **个人测试仓**例外处理：`backend/.env` 会随同步复制到仓库根并强制提交
    （sync_catpaw.sh 复制 + deploy.sh `git add -f`），`server.py` 启动时由
    `load_dotenv` / pydantic `env_file` 双机制读取。切勿将此做法用于团队仓或线上仓。
+5. 构建工具链在发布仓根 `manifest.yaml` 声明（`sync_catpaw.sh` 生成，含
+   `gcc`/`gcc-c++` 等）。`.catpaw/catpaw_deploy.yaml` 的 build.tools 不随部署
+   工具生成的外部清单传递（2026-09-08 实测仅声明 gcc-c++ 时容器内仍无编译器）；
+   但根治手段是 requirements.txt 全 wheel 锁定，工具链仅为兜底。
 
 ## 日常重新部署流程
 
@@ -73,8 +77,11 @@ cd "/Users/jiang/Desktop/CodePilot /backend" && make sync-catpaw
    - `repo` 精确为 `ssh://git@git.sankuai.com/~jiangwenzhe02/jingwai-agent-main.git`、
      `branch: master`（CloudNative 构建按此 checkout 发布仓；字段缺失或用 HTTPS 地址
      会在 checkout 阶段报 git exit 128，2026-09-03 实测）
-   - 依赖全部钉死在内网 PyPI 提供预编译 wheel 的版本（见 `deploy/requirements.txt`），
+   - 依赖全部钉死在内网 PyPI 提供预编译 wheel 的版本：直接依赖 + native 传递依赖
+     全量锁定（含 contourpy/kiwisolver/pillow 等，见 `deploy/requirements.txt`），
      `cmd` 不传 `--only-binary`（其值会破坏平台生成的外部清单，2026-09-08 实测）
+   - 发布仓根存在 `manifest.yaml`，build.tools 声明 `gcc`/`gcc-c++`（平台按它安装
+     构建工具链；CentOS 7 默认不装 gcc-c++）
 5. 仅在同步与校验成功后，在发布仓提交所有由同步产生的源码、部署配置及 `src/codepilot/api/static/` 静态产物，并推送：
 
 ```bash
@@ -115,6 +122,12 @@ curl -s -o /dev/null -w '%{http_code}\n' https://plus-jiangwenzhe02-codepilot.da
   `plus-jiangwenzhe02-codepilot.database.sankuai.com`（那是 CloudNative 固定 projectID
   的域名）。处理：只对发布仓触发 CloudNative 部署（步骤 6），删除误生成的 cargo 配置。
   同因：发布仓 yaml 丢失 `repo`/`branch` 字段（2026-09-08 实遇，项目重构时模板被重写丢失）。
+- `meson ERROR: Unknown compiler(s): [['c++'], ['g++'], ['clang++'], ...]`：某个
+  native 包回退 sdist 源码编译且容器内无 C++ 编译器（2026-09-08 contourpy 实例：
+  未锁定版本时解析到只有 manylinux_2_28 wheel 的新版，自动回退 sdist）。处理：用
+  requirements.txt 头部注释里的 wheel 预检命令找到该包有 cp312 manylinux2014
+  wheel 的版本并加入锁定，重新同步部署；不要指望装编译器解决——CentOS 7 的
+  gcc 4.8.5 不满足现代 meson 的 C++17 要求。
 - `npm: command not found`：确认 CloudNative YAML 的 `cmd` 中没有 npm；重新执行同步，使静态产物进入 `src/codepilot/api/static/` 后再发布。
 - `frontend build is unavailable`：检查发布仓的 `src/codepilot/api/static/index.html` 是否被提交；确认 `app.py` 从模块相邻的 `static` 目录读取。
 - 根路径无响应：核对 `ports` 的第一个值是 `8000`，并确保 `python server.py` 监听 8000。
