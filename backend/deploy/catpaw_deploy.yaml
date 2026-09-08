@@ -1,6 +1,10 @@
 # CatPaw 部署配置 — CodePilot FastAPI（主图 BFF）
-# Plus 构建工具选 virtualenv（无 root，与仓库 uv/hatchling 开发结构兼容）。
-# LONGCAT_API_KEY 等密钥走 Plus 环境变量注入，不要提交 .env。
+# CloudNative 构建按下方 repo/branch checkout 发布仓（9月3日实测：HTTPS 地址会 502，
+# 必须用 SSH；Cargo/PlusBuild 的服务账号读不了个人仓，个人项目只能走 CloudNative）。
+# repo/branch 不可删除：缺失会让构建 checkout 失败（git exit 128）。
+# 密钥策略：CloudNative 无环境变量注入机制，个人测试仓例外——同步脚本把 backend/.env
+# 复制到发布仓根并随仓提交（deploy.sh git add -f），容器内 load_dotenv 读取。
+# 切勿将此做法用于团队仓或线上仓。
 type: cloudnative
 # 固定测试容器与访问域名，避免每次构建生成不同的临时 projectID。
 projectID: jiangwenzhe02-codepilot
@@ -8,10 +12,15 @@ projectID: jiangwenzhe02-codepilot
 python: "3.12"
 build:
   tools:
-    gcc: "4.8.5"
+    rust: "1.85.0"
+    cargo: "1.85.0"
     gcc-c++: "4.8.5"
     ninja: "1.10.2"
     libjpeg-turbo-devel: "1.5.3"
+repo: ssh://git@git.sankuai.com/~jiangwenzhe02/jingwai-agent-main.git
+branch: master
+# 依赖已在 requirements.txt 全部钉死为内网 PyPI 提供预编译 wheel 的版本；
+# 不传 --only-binary（其值曾破坏平台生成的外部清单）。
 cmd:
   - pip install -i https://pypi.sankuai.com/simple/ --trusted-host pypi.sankuai.com -r requirements.txt
 target:

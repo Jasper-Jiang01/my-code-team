@@ -104,9 +104,12 @@ validate() {
   [ -f "$yaml" ] || die "缺少 $yaml"
   grep -q '^type: cloudnative' "$yaml" || die "部署配置 type 不是 cloudnative"
   grep -Eq '^python: *"3\.12"' "$yaml" || die "部署配置 python 不是 3.12"
-  if grep -Eq '^(build|repo|branch):' "$yaml"; then
-    die "部署配置包含 CloudNative 简化清单不支持的 build、repo 或 branch 字段；部署必须从发布仓的有效 Git 提交触发"
-  fi
+  # repo/branch 是 CloudNative 构建的 checkout 来源（2026-09-03 实测：字段缺失、或用
+  # HTTPS 地址会 502，均导致 checkout 阶段 git exit 128）。必须精确指向发布仓自身；
+  # build.tools 允许存在（为纯 wheel 依赖之外的情况兜底）。
+  grep -q '^repo: ssh://git@git.sankuai.com/~jiangwenzhe02/jingwai-agent-main.git$' "$yaml" \
+    || die "部署配置 repo 字段缺失或不正确（应为发布仓的 SSH 地址，不可用 HTTPS）"
+  grep -q '^branch: master$' "$yaml" || die "部署配置 branch 不是 master"
   grep -q 'python server.py' "$yaml" || die "runCmd 缺少 python server.py"
   awk '/^ports:/{getline; print; exit}' "$yaml" | grep -Eq '^[[:space:]]*- 8000[[:space:]]*$' \
     || die "ports 首个端口不是 8000"

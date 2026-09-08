@@ -70,6 +70,11 @@ cd "/Users/jiang/Desktop/CodePilot /backend" && make sync-catpaw
    - `runCmd` 包含 `python server.py`
    - `ports` 第一个端口为 `8000`
    - `cmd` 不包含 `npm`
+   - `repo` 精确为 `ssh://git@git.sankuai.com/~jiangwenzhe02/jingwai-agent-main.git`、
+     `branch: master`（CloudNative 构建按此 checkout 发布仓；字段缺失或用 HTTPS 地址
+     会在 checkout 阶段报 git exit 128，2026-09-03 实测）
+   - 依赖全部钉死在内网 PyPI 提供预编译 wheel 的版本（见 `deploy/requirements.txt`），
+     `cmd` 不传 `--only-binary`（其值会破坏平台生成的外部清单，2026-09-08 实测）
 5. 仅在同步与校验成功后，在发布仓提交所有由同步产生的源码、部署配置及 `src/codepilot/api/static/` 静态产物，并推送：
 
 ```bash
@@ -103,6 +108,13 @@ curl -s -o /dev/null -w '%{http_code}\n' https://plus-jiangwenzhe02-codepilot.da
 
 ## 失败处理
 
+- `build step 2 checkout failed: Git operation error: exit status 128`：部署被触发成了
+  Cargo/PlusBuild 通道（对根工作区或任何没有 `.catpaw/catpaw_deploy.yaml` 的目录调用
+  catpaw_deploy 时，工具会自动生成 cargo 配置并复用废弃 appkey
+  `com.sankuai.picasso.codepilot`，其服务账号读不了个人仓）。该通道即使成功也服务不了
+  `plus-jiangwenzhe02-codepilot.database.sankuai.com`（那是 CloudNative 固定 projectID
+  的域名）。处理：只对发布仓触发 CloudNative 部署（步骤 6），删除误生成的 cargo 配置。
+  同因：发布仓 yaml 丢失 `repo`/`branch` 字段（2026-09-08 实遇，项目重构时模板被重写丢失）。
 - `npm: command not found`：确认 CloudNative YAML 的 `cmd` 中没有 npm；重新执行同步，使静态产物进入 `src/codepilot/api/static/` 后再发布。
 - `frontend build is unavailable`：检查发布仓的 `src/codepilot/api/static/index.html` 是否被提交；确认 `app.py` 从模块相邻的 `static` 目录读取。
 - 根路径无响应：核对 `ports` 的第一个值是 `8000`，并确保 `python server.py` 监听 8000。
