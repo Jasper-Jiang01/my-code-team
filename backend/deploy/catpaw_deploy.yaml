@@ -6,6 +6,12 @@ type: cloudnative
 projectID: jiangwenzhe02-codepilot
 # 前端产物在本地同步阶段构建并随代码提交；云端仅运行 Python 服务，避免依赖容器中的 npm。
 python: "3.12"
+build:
+  tools:
+    gcc: "4.8.5"
+    gcc-c++: "4.8.5"
+    ninja: "1.10.2"
+    libjpeg-turbo-devel: "1.5.3"
 cmd:
   - pip install -i https://pypi.sankuai.com/simple/ --trusted-host pypi.sankuai.com -r requirements.txt
 target:
