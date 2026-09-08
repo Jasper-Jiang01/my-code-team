@@ -22,6 +22,7 @@ wheels/
 
 # Tests
 .pytest_cache/
+.ruff_cache/
 
 # Generated prototypes / demos
 artifacts/
@@ -43,8 +44,9 @@ venv/
 *.pckl
 
 # Checkpoints & Memory
+# SQLite checkpoint 运行时产物（含 WAL/SHM 伴生文件）
+codepilot_checkpoints.db*
+*.db-shm
+*.db-wal
 checkpoints/*
 !checkpoints/.gitkeep
-memory/agent_memory/*
-!memory/agent_memory/.gitkeep
-memory/vector_store.json

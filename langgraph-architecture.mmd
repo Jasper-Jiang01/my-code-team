@@ -44,7 +44,7 @@ flowchart TB
         PD_FANOUT --> PD_SYN
     end
 
-    PD_TOOLS[("Tools/Skills\nsearch_km · vector_memory")]
+    PD_TOOLS[("Tools/Skills\nsearch_km · search_web · compare_evidence · vector_memory")]
     PD -.调用.-> PD_TOOLS
     PD <-.facts_ledger.-> STATE
 
@@ -67,7 +67,7 @@ flowchart TB
         DEC_JUDGE -- "needs_fix" --> DEC_PRODUCER
     end
 
-    DEC_TOOLS[("Tools/Skills\nquery_sql (SQLDatabaseToolkit)")]
+    DEC_TOOLS[("Tools/Skills\nsearch_km · search_web · compare_evidence · vector_memory")]
     DEC -.调用.-> DEC_TOOLS
     DEC <-.spec / evidence.-> STATE
 

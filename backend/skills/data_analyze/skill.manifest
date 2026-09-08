@@ -1,0 +1,21 @@
+skill-manifest-version: 1
+skill-id: 40f7bdeeb5fa810b217e51e1a2b33fa679dd74a5830b48a0735061ff63500fae
+
+files:
+  c929697093398812abf7c3e16c43b880ebbd3a60a48ab4e6dde4a531745f022a  SKILL.md
+  6bd23862c410870960c38a6930beefe84ce915db00c796c5a2c6a784b4f7b5ec  references/analyze.md
+  4f081306f7b435b714cffbb9d5cab025014f42c44111cc15ef24c390698bbf1a  references/auth.md
+  e31240508efeb5548b5402aca210c9ea315ff5913d04f8829ea8de3ef6d03d7c  references/commands.md
+  a6f2e7cb80cb9f0d9119395ea93f33a06fd2607e05752ec856550d2743d3ac10  references/environment-setup.md
+  8e139fadc0bf4a7b0e1ad0289de7049557d53daaf8f5ffa444d8b80250915138  references/gray-release.md
+  5cd46f4fda9e9a9a7f510067769d40b0a0dad83f278022330d3ad950dd82dc28  references/output.md
+  95e84a0241e35d7942347832f5c7871dc1d0a651ca32c70e37a66cd18013a451  references/plan-deprecated.md
+  1eb1a758c60158759ccacf97adc4fbf588df7f858884d0da90d87e61b3556016  references/plan.md
+  3d8086b782131e359bf760ca7d5dd301187849cc362a5b7631fde77fc7c34cb8  scripts/bootstrap.ps1
+  1428ed6538eb5068936a0224a3007decef07e570f24419cd5228309f7714ebf7  scripts/bootstrap.sh
+  57b5c88bb508c51095374ff7725bfca16416563b6e6e4417d0a5388e67213eba  scripts/call_ba_agent.py
+  bdeeaa7775ab3723f94c0e360857930a404a2d0829c3f6d0f54621565811ecd2  scripts/inject-ba-cookie-catdesk.py
+  0eebb1ce736b1cf906cb1c60132f8977539633cc8cc35192a3628fda105a5f8b  scripts/inject-ba-cookie-moa.py
+  a64e84baf11282d0658f6c44e01d8733775ced4dc27d46f92ba37eda95319b27  scripts/inject-ba-cookie-playwright.py
+  d3e9cacde95088baceb58288da78f62e6170c77b118bf04c92ec6a22d62ef02f  scripts/inject-ba-cookie-supabase-ciba.py
+  ca8e4672aa9d59f11fd8a0b0d547cd1686972eea4e63a6d8e43fc21c18107898  scripts/lx.js

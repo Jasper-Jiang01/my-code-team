@@ -1,0 +1,29 @@
+{
+  "frontend": {
+    "appId": "2000757",
+    "appName": "codepilot-web",
+    "appKey": "com.sankuai.picasso.web.codepilot",
+    "repo": "ssh://git@git.sankuai.com/nibfe/codepilot-web.git",
+    "branch": "main",
+    "dockerImage": "Node 18",
+    "templates": {
+      "newtest": "577640",
+      "staging": "577639",
+      "production": "577638",
+      "canary": "577637"
+    },
+    "lastNewtestFlowId": "22381678",
+    "newtestUrl": "https://ws.cloud.test.sankuai.com/com.sankuai.picasso.web.codepilot/index.html"
+  },
+  "notes": {
+    "oceanusFrontendAppKey": "com.sankuai.picasso.web.codepilot",
+    "backendRepo": "ssh://git@git.sankuai.com/~jiangwenzhe02/jingwai-agent-main.git",
+    "backendAppKeyHint": "com.sankuai.codepilot.server（Plus/CatPaw 申请）",
+    "unusedPersonalTalosApp": {
+      "appId": "2000756",
+      "appKey": "com.sankuai.picasso.codepilot",
+      "reason": "hfe_stash 读不了个人仓 ~jiangwenzhe02/jingwai-agent-main"
+    },
+    "accidentalEmptyRepo": "ssh://git@git.sankuai.com/fe/codepilot-web.git"
+  }
+}

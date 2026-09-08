@@ -1,8 +1,23 @@
-# macOS
-.DS_Store
+# Cursor / 内网发布仓（独立 Git，勿并入 GitHub origin）
+jingwai-agent-main/
+codepilot-web/
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
+
+# macOS
+**/.DS_Store
+
+# Python 工具缓存
+.pytest_cache/
+.ruff_cache/
+
+# 前端构建产物与本地调试截图（内网发布仓由 sync 脚本自带规则）
+frontend/build/
+frontend/.screenshots/
+
+# CatPaw 本地部署元数据
+backend/.catpaw/

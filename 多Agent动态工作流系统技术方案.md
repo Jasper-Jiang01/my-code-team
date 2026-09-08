@@ -8,8 +8,6 @@
 
 ### 1.1 业务背景
 
-本文档参考 Stark（杜佳豪）在「绑定 PM 系统后，20 个 Agent 员工带飞原本是研发的我」中的实践，核心命题是：
-
 - **AI-Driven PM** 负责探索、决策与调度——先证明什么值得做；
 - **AI-SDLC** 作为可靠交付的生产子流程——把确定的事稳定做出来。
 
@@ -97,7 +95,7 @@ START
    │  execute_research → Agent(research.yaml)                │
    │  → fan_out: Send(researcher, query) 种子查询发散         │
    │  → synthesize_results 关键词网络/向量检索收口             │
-   │  工具: search_km · vector_memory                        │
+   │  工具: search_km · search_web · compare_evidence · vector_memory │
    │  读写: facts_ledger                                     │
    └───────────────────────┬───────────────────────────────┘
                             ▼
@@ -106,7 +104,7 @@ START
    │  execute_data → Agent(data.yaml)                        │
    │  → producer 方案生成 → critic 红军挑战 → judge 对抗裁决   │
    │  judge=needs_fix 时回环 producer                         │
-   │  工具: query_sql (SQLDatabaseToolkit)                    │
+   │  工具: search_km · search_web · compare_evidence · vector_memory │
    │  读写: spec / evidence                                   │
    └───────────────────────┬───────────────────────────────┘
                     judge=pass ▼
@@ -207,8 +205,8 @@ class WorkflowState(TypedDict):
 
 | 所属子图 | 工具 | 说明 |
 |---------|------|------|
-| `ProblemDiscoveryGraph`（研究组） | `search_km`（KM 检索）、`vector_memory`（向量记忆） | 学城/内部知识检索、历史研究索引召回 |
-| `DecisionGraph`（数据组+红军组） | `query_sql`（`SQLDatabaseToolkit`） | 取数、口径校验、指标测算 |
+| `ProblemDiscoveryGraph`（研究组） | `search_km`（KM 检索）、`search_web`（网页检索）、`compare_evidence`（内外对照）、`vector_memory`（向量记忆） | 学城/内部知识 + 公开网页自主检索，对照共识/冲突后写入事实台账 |
+| `DecisionGraph`（数据组+红军组） | `search_km`、`search_web`、`compare_evidence`、`vector_memory` | 口径解释、规模测算；内部口径与外部说法冲突时并列（无数据库取数） |
 | `ProductionGraph`（生产组） | `deploy_demo`（Demo 部署）、`screenshot_diff`（视觉比对）、`MCP` / `PythonREPL` | 开发实现、截图对比、代码执行 |
 | `ReviewGraph`（质检组） | `screenshot_diff`（视觉门复用）、规则引擎 | 视觉还原比对、功能门规则校验 |
 
@@ -326,7 +324,8 @@ builder.add_edge("fix_agent", "qa_gate")
 ```text
 backend/
 ├── agents/                      # Agent Harness 配置
-│   ├── research.yaml            # 研究 Agent Harness
+    │   ├── research.yaml            # 研究 Agent Harness
+    │   ├── knowledge.yaml           # 问答：自主检索 + 对照
 │   ├── data.yaml
 │   ├── design.yaml
 │   ├── qa.yaml
@@ -338,7 +337,8 @@ backend/
 │       └── city_supply.yaml
 ├── skills/                      # 可复用技能（面向 Harness 的技能封装）
 │   ├── search_km.py             # 学城检索
-│   ├── query_sql.py             # 数据取数
+│   ├── search_web.py            # 外部网页检索
+│   ├── compare_evidence.py      # 内外检索对照
 │   ├── screenshot_diff.py       # 视觉比对
 │   └── deploy_demo.py           # Demo 部署
 ├── memory/
@@ -355,7 +355,7 @@ backend/
     │   ├── decision.py          # DecisionGraph 数据组+红军组子图
     │   ├── production.py        # ProductionGraph 生产组子图（静态六步）
     │   └── review.py            # ReviewGraph 质检组+五岗位评委子图
-    └── tools/                   # 工具定义：search_km / query_sql / screenshot_diff / deploy_demo / vector_memory
+    └── tools/                   # 工具定义：search_km / search_web / compare_evidence / screenshot_diff / deploy_demo / vector_memory
 ```
 
 `agents/*.yaml`（角色 Harness 配置）与 `src/codepilot/{nodes,graphs}/`（LangGraph 执行代码）职责分离：前者定义 Prompt、工具授权与评测集，后者负责编排与状态流转，二者通过 `nodes/execute_*.py` 中的 Agent 加载逻辑连接。

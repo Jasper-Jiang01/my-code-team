@@ -37,17 +37,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Validate GitHub Pages API configuration
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || '' }}
+        run: |
+          if [ -z "$VITE_API_BASE_URL" ]; then
+            echo "Repository variable VITE_API_BASE_URL is required: GitHub Pages has no /api proxy."
+            exit 1
+          fi
+
       - name: Build
         env:
           GITHUB_PAGES: "true"
-          # 后端尚未部署时的占位地址，后端上线后请在此处替换为真实地址
-          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || 'http://localhost:2024' }}
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
         run: npm run build
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: frontend/dist
+          path: frontend/build
 
   deploy:
     needs: build

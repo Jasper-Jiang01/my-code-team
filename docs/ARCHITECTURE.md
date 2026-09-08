@@ -5,42 +5,37 @@ CodePilot 是多 Agent 动态工作流：前端聊天提出目标，LangGraph Pl
 ## 1. 总体架构
 
 ```
-┌─────────────────────┐     POST /threads/{id}/runs/stream     ┌──────────────────────────┐
-│  Frontend (React)   │ ─────────────────────────────────────► │  LangGraph Platform      │
-│  Vite + TS          │ ◄───────────────────────────────────── │  :2024  langgraph dev    │
-│  映射 updates/SSE    │   updates / messages / interrupt       │                          │
+┌─────────────────────┐     POST /api/chat  SSE                 ┌──────────────────────────┐
+│  Frontend (React)   │ ─────────────────────────────────────► │  FastAPI BFF  :8000      │
+│  Vite + TS          │ ◄───────────────────────────────────── │  CatPaw / make serve     │
+│  token / interrupt  │   token / tool / interrupt / done      │                          │
 └─────────────────────┘                                        │  graph: main_workflow    │
-                                                               │    classify              │
-                                                               │    research 子图         │
-                                                               │    data 子图 + 锦标赛     │
-                                                               │    produce 六步静态流     │
-                                                               │    qa 评委 + 三道门       │
-                                                               │    human_confirm         │
-                                                               │                          │
-                                                               │  State Bus + Checkpointer│
-                                                               │  SQLite / PostgresSaver  │
+                                                               │  + SQLite/PostgresSaver  │
                                                                └──────────────────────────┘
 ```
 
-本地启动：`cd backend && make run`（`langgraph dev`），Studio / API 在 `http://127.0.0.1:2024`。图 id 为 `main_workflow`（见 `backend/langgraph.json`）。
+本地调试图结构仍可用 `cd backend && make run`（`langgraph dev`，Studio 在 `:2024`）。内网发布与前端默认对接 FastAPI：`cd backend && make serve`（`:8000`）。图 id 为 `main_workflow`（见 `backend/langgraph.json`）。
 
 ## 2. 分层职责
 
 | 层 | 位置 | 职责 | 禁止 |
 |----|------|------|------|
-| 前端 | `frontend/` | 创建 thread、订阅 runs/stream、渲染节点轨迹 | 直连 LLM、绕过门禁 |
+| 前端 | `frontend/` | 订阅 `/api/chat` SSE、渲染节点轨迹与 interrupt | 直连 LLM、绕过门禁 |
 | 主图 | `graphs/main_workflow.py` | 四闭环编排与 QA 后 rerun | 把子图逻辑摊进主图 |
 | 子图 | `graphs/{problem_discovery,decision,production,review}.py` | 各自拥有的 State Bus 字段 | 跨子图偷偷改别人的台账 |
 | Harness | `backend/agents/*.yaml` | 角色、工具、output_schema、state_fields | 一个 YAML 同时扮演生产与审核 |
-| Skills | `backend/skills/` | 工具入口（search_km / query_sql / 截图 / 部署等） | 在节点里复制工具实现 |
+| Skills | `backend/skills/` | 工具入口（search_km / search_web / compare_evidence / 截图 / 部署等） | 在节点里复制工具实现 |
 | State Bus | `states/` | 事实/规则/问题台账、规格、产物、门禁 | `operator.add` 膨胀台账 |
 | Checkpoint | `core/checkpointer.py` | 平台注入 / SqliteSaver / PostgresSaver | 给 Platform 再挂一份进程内 saver |
 
 ## 3. 关键技术决策
 
-### 3.1 运行时：LangGraph Platform，而不是自建 FastAPI 聊天接口
+### 3.1 运行时：本地 Studio 用 Platform，内网用 FastAPI
 
-主图以原生子图挂到 `main_workflow`，演示门 `interrupt` 后用 `Command(resume={'approved': true})` 恢复。前端默认 `VITE_API_BASE_URL=http://localhost:2024`，`POST /threads` 再 `POST /threads/{id}/runs/stream`，`assistant_id` 为 `main_workflow`。
+主图以原生子图挂到 `main_workflow`，演示门 `interrupt` 后用 `Command(resume={'approved': true})` 恢复。
+
+- 本地 Studio：`make run` → `langgraph dev`（`:2024`），图入口不预挂 checkpointer。
+- 前端 / CatPaw：`make serve` → FastAPI `POST /api/chat`、`POST /api/resume`（`:8000`），进程内 `create_checkpointer()`。前端默认 `VITE_API_BASE_URL` 为空（同域 `/api`；本地 Vite 代理到 `:8000`）。
 
 ### 3.2 State Bus 与 Prompt 裁剪
 
@@ -73,10 +68,12 @@ LangGraph SSE 被映射为 UI 事件：
 | `end` | `done`（携带 `thread_id`） |
 | `error` | `error` |
 
-演示门恢复：在 Studio 或 API 对同一 thread 发送 `Command(resume={'approved': true, 'comment': '...'})`。
+演示门恢复：对同一 `session_id` 调用 `POST /api/resume`，body 为 `{"approved": true, "comment": "..."}`。
 
 ## 5. 本地开发
 
-1. `cd backend && make run` → `http://127.0.0.1:2024`
-2. `cd frontend && npm run dev` → Vite 默认 5173，请求打到 2024
-3. `cd backend && make test` / `make eval`
+1. `cd backend && make serve` → FastAPI `http://127.0.0.1:8000`
+2. `cd frontend && npm run dev` → Vite 默认 5173，请求打到 8000
+3. 需要 Studio 时另开 `cd backend && make run`（`:2024`）
+4. `cd backend && make test` / `make eval`
+5. 内网发布：`cd backend && make sync-catpaw`，再从 `jingwai-agent-main` 推 `master` 走 CatPaw

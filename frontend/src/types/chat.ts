@@ -1,46 +1,36 @@
-/**
- * 前后端共享契约类型 —— 前端对接 LangGraph Platform（默认 :2024）。
- */
+/** 前后端共享的最小聊天契约。 */
 
 export type MessageRole = 'user' | 'assistant';
 
 export interface ChatMessage {
   id: string;
   role: MessageRole;
+  /** 仅保存面向用户的最终答复，不包含工具或推理过程。 */
   content: string;
-  /** Agent 节点 / 工具调用过程展示（可选） */
-  toolTrace?: ToolTrace[];
 }
 
-export interface ToolTrace {
-  name: string;
-  args?: Record<string, unknown>;
-  result?: string;
-}
-
-/** 聊天请求：message 作为工作流 userMessage（纯文本） */
 export interface ChatRequest {
   message: string;
   session_id?: string;
-  scope?: string;
+  /** 可选：显式意图（如快捷入口“数据分析专家”传 data_analysis），跳过后端意图分类直接进入对应子图。 */
+  intent?: string;
 }
 
-/** 人机确认恢复载荷，对应 Command(resume=...) */
-export interface ResumePayload {
+export interface ResumeRequest {
+  session_id: string;
   approved: boolean;
   comment?: string;
 }
 
-export interface InterruptInfo {
+/** HumanInTheLoop 审批请求（写文件等敏感操作执行前挂起）。 */
+export interface PendingInterrupt {
   prompt: string;
-  reason?: string;
+  reason: string | null;
 }
 
-/** UI 事件载荷（由 LangGraph SSE 映射而来） */
 export type SSEEvent =
+  | { type: 'session'; session_id: string }
   | { type: 'token'; content: string }
-  | { type: 'tool_call'; name: string; args: Record<string, unknown> }
-  | { type: 'tool_result'; name: string; result: string }
-  | { type: 'interrupt'; prompt: string; reason?: string }
+  | { type: 'interrupt'; prompt: string; reason: string | null }
   | { type: 'done'; session_id: string }
   | { type: 'error'; code: string; message: string };

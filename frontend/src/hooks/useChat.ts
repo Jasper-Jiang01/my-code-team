@@ -1,6 +1,14 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { resumeChat, streamChat } from '../lib/api-client';
-import type { ChatMessage, InterruptInfo, ResumePayload, SSEEvent } from '../types/chat';
+import {
+  loadMessages,
+  loadSessionIndex,
+  persistMessages,
+  removeSession,
+  upsertSession,
+  type StoredSession,
+} from '../lib/session-store';
+import type { ChatMessage, ChatRequest, PendingInterrupt, SSEEvent } from '../types/chat';
 
 function uid(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -9,92 +17,92 @@ function uid(): string {
 export interface UseChatResult {
   messages: ChatMessage[];
   streaming: boolean;
+  hasReceivedToken: boolean;
   error: string | null;
-  pendingInterrupt: InterruptInfo | null;
-  send: (text: string) => void;
-  resume: (payload: ResumePayload) => void;
+  pendingInterrupt: PendingInterrupt | null;
+  sessions: StoredSession[];
+  send: (text: string, intent?: string) => void;
+  resume: (approved: boolean, comment?: string) => void;
   stop: () => void;
+  reset: () => void;
+  openSession: (threadId: string) => void;
+  deleteSession: (threadId: string) => void;
 }
 
-/** 聊天状态管理：流式聚合 token，透出工具调用轨迹与 interrupt 恢复。 */
+/** 最小聊天状态管理：发送、流式聚合、停止和本地会话记录。 */
 export function useChat(): UseChatResult {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
+  const [hasReceivedToken, setHasReceivedToken] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pendingInterrupt, setPendingInterrupt] = useState<InterruptInfo | null>(null);
+  const [pendingInterrupt, setPendingInterrupt] = useState<PendingInterrupt | null>(null);
+  const [sessions, setSessions] = useState<StoredSession[]>(() => loadSessionIndex());
   const sessionRef = useRef<string | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
   const assistantIdRef = useRef<string | null>(null);
-
-  const pendingTokensRef = useRef<string>('');
+  const pendingTokensRef = useRef('');
   const rafIdRef = useRef<number | null>(null);
+  const messagesRef = useRef<ChatMessage[]>([]);
 
-  const updateAssistant = useCallback((updater: (m: ChatMessage) => ChatMessage) => {
-    const assistantId = assistantIdRef.current;
-    if (!assistantId) return;
-    setMessages((prev) => prev.map((m) => (m.id === assistantId ? updater(m) : m)));
+  const applyMessages = useCallback((updater: (previous: ChatMessage[]) => ChatMessage[]) => {
+    setMessages((previous) => {
+      const next = updater(previous);
+      messagesRef.current = next;
+      return next;
+    });
   }, []);
+
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current);
+    },
+    [],
+  );
+
+  const updateAssistant = useCallback(
+    (updater: (message: ChatMessage) => ChatMessage) => {
+      const assistantId = assistantIdRef.current;
+      if (!assistantId) return;
+      applyMessages((previous) =>
+        previous.map((message) => (message.id === assistantId ? updater(message) : message)),
+      );
+    },
+    [applyMessages],
+  );
 
   const flushTokens = useCallback(() => {
     rafIdRef.current = null;
     const delta = pendingTokensRef.current;
     pendingTokensRef.current = '';
-    if (delta) {
-      updateAssistant((m) => ({ ...m, content: m.content + delta }));
-    }
+    if (delta) updateAssistant((message) => ({ ...message, content: message.content + delta }));
   }, [updateAssistant]);
 
   const scheduleTokenFlush = useCallback(() => {
-    if (rafIdRef.current !== null) return;
-    rafIdRef.current = requestAnimationFrame(flushTokens);
+    if (rafIdRef.current === null) rafIdRef.current = requestAnimationFrame(flushTokens);
   }, [flushTokens]);
-
-  const finishStream = useCallback(() => {
-    if (rafIdRef.current !== null) {
-      cancelAnimationFrame(rafIdRef.current);
-      rafIdRef.current = null;
-    }
-    if (pendingTokensRef.current) {
-      const delta = pendingTokensRef.current;
-      pendingTokensRef.current = '';
-      updateAssistant((m) => ({ ...m, content: m.content + delta }));
-    }
-    setStreaming(false);
-    abortRef.current = null;
-  }, [updateAssistant]);
 
   const onEvent = useCallback(
     (event: SSEEvent) => {
       switch (event.type) {
         case 'token':
+          setHasReceivedToken(true);
           pendingTokensRef.current += event.content;
           scheduleTokenFlush();
           break;
-        case 'tool_call':
-          updateAssistant((m) => ({
-            ...m,
-            toolTrace: [...(m.toolTrace ?? []), { name: event.name, args: event.args }],
-          }));
-          break;
-        case 'tool_result':
-          updateAssistant((m) => {
-            const trace = [...(m.toolTrace ?? [])];
-            const idx = trace.findIndex((t) => t.name === event.name && t.result === undefined);
-            if (idx !== -1) trace[idx] = { ...trace[idx], result: event.result };
-            return { ...m, toolTrace: trace };
-          });
-          break;
         case 'interrupt':
+          // HumanInTheLoop：写文件等敏感操作等待审批，流挂起但连接仍保持
           setPendingInterrupt({ prompt: event.prompt, reason: event.reason });
           break;
+        case 'session':
         case 'done':
           sessionRef.current = event.session_id;
           break;
         case 'error':
           setError(event.message);
-          updateAssistant((m) => ({
-            ...m,
-            content: m.content || '（生成失败，请重试）',
+          updateAssistant((message) => ({
+            ...message,
+            content: message.content || '（生成失败，请重试）',
           }));
           break;
       }
@@ -102,87 +110,150 @@ export function useChat(): UseChatResult {
     [scheduleTokenFlush, updateAssistant],
   );
 
+  const startStream = useCallback(
+    (request: () => Promise<void>) => {
+      setStreaming(true);
+      setHasReceivedToken(false);
+      pendingTokensRef.current = '';
+      const controller = new AbortController();
+      abortRef.current = controller;
+      request()
+        .catch((reason: unknown) => {
+          if ((reason as Error)?.name === 'AbortError') return;
+          setError('无法连接后端，请确认已启动 FastAPI（默认 http://localhost:8000）');
+          updateAssistant((message) => ({ ...message, content: message.content || '（连接失败）' }));
+        })
+        .finally(() => {
+          // 审批挂起时保持 pendingInterrupt，不视为流结束失败
+          if (rafIdRef.current !== null) {
+            cancelAnimationFrame(rafIdRef.current);
+            rafIdRef.current = null;
+          }
+          flushTokens();
+          setStreaming(false);
+          abortRef.current = null;
+          const threadId = sessionRef.current;
+          if (threadId) {
+            persistMessages(threadId, messagesRef.current);
+            setSessions(loadSessionIndex());
+          }
+        });
+    },
+    [flushTokens, updateAssistant],
+  );
+
   const send = useCallback(
-    (text: string) => {
+    (text: string, intent?: string) => {
       const trimmed = text.trim();
       if (!trimmed || streaming) return;
       setError(null);
       setPendingInterrupt(null);
 
-      const userMsg: ChatMessage = { id: uid(), role: 'user', content: trimmed };
+      const userMessage: ChatMessage = { id: uid(), role: 'user', content: trimmed };
       const assistantId = uid();
       assistantIdRef.current = assistantId;
-      const assistantMsg: ChatMessage = { id: assistantId, role: 'assistant', content: '', toolTrace: [] };
-      setMessages((prev) => [...prev, userMsg, assistantMsg]);
-      setStreaming(true);
+      applyMessages((previous) => [
+        ...previous,
+        userMessage,
+        { id: assistantId, role: 'assistant', content: '' },
+      ]);
 
-      const controller = new AbortController();
-      abortRef.current = controller;
+      // intent 来自快捷入口（如“数据分析专家”卡片）：跳过后端意图分类，直接进入指定子图
+      const payload: ChatRequest = { message: trimmed, session_id: sessionRef.current };
+      if (intent) payload.intent = intent;
 
-      streamChat(
-        { message: trimmed, session_id: sessionRef.current },
-        onEvent,
-        controller.signal,
-        (threadId) => {
-          sessionRef.current = threadId;
-        },
-      )
-        .catch((err: unknown) => {
-          if ((err as Error)?.name === 'AbortError') return;
-          setError('无法连接 LangGraph，请确认已启动（默认 http://localhost:2024，backend 目录执行 make run）');
-          updateAssistant((m) => ({ ...m, content: m.content || '（连接失败）' }));
-        })
-        .finally(finishStream);
+      startStream(() =>
+        streamChat(
+          payload,
+          onEvent,
+          abortRef.current?.signal,
+          (threadId) => {
+            if (!sessionRef.current) setSessions(upsertSession(threadId, trimmed));
+            sessionRef.current = threadId;
+          },
+        ),
+      );
     },
-    [streaming, onEvent, updateAssistant, finishStream],
+    [applyMessages, onEvent, startStream, streaming],
   );
 
+  /** 审批挂起的 HumanInTheLoop 中断：approve / reject 后继续接收回复。 */
   const resume = useCallback(
-    (payload: ResumePayload) => {
+    (approved: boolean, comment?: string) => {
       const threadId = sessionRef.current;
       if (!threadId || streaming || !pendingInterrupt) return;
-      setError(null);
       setPendingInterrupt(null);
-      setStreaming(true);
+      setError(null);
 
-      const assistantId = assistantIdRef.current ?? uid();
+      const assistantId = uid();
       assistantIdRef.current = assistantId;
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === assistantId)) {
-          return prev.map((m) =>
-            m.id === assistantId
-              ? { ...m, content: `${m.content}\n（已提交人工确认：${payload.approved ? '通过' : '驳回'}）\n` }
-              : m,
-          );
-        }
-        return [
-          ...prev,
-          {
-            id: assistantId,
-            role: 'assistant',
-            content: `（已提交人工确认：${payload.approved ? '通过' : '驳回'}）\n`,
-            toolTrace: [],
-          },
-        ];
-      });
+      applyMessages((previous) => [...previous, { id: assistantId, role: 'assistant', content: '' }]);
 
-      const controller = new AbortController();
-      abortRef.current = controller;
-
-      resumeChat(threadId, payload, onEvent, controller.signal)
-        .catch((err: unknown) => {
-          if ((err as Error)?.name === 'AbortError') return;
-          setError('恢复工作流失败，请确认 thread 仍有效且后端已启动');
-          updateAssistant((m) => ({ ...m, content: m.content || '（恢复失败）' }));
-        })
-        .finally(finishStream);
+      startStream(() =>
+        resumeChat(
+          { session_id: threadId, approved, comment },
+          onEvent,
+          abortRef.current?.signal,
+        ),
+      );
     },
-    [streaming, pendingInterrupt, onEvent, updateAssistant, finishStream],
+    [applyMessages, onEvent, pendingInterrupt, startStream, streaming],
   );
 
-  const stop = useCallback(() => {
+  const stop = useCallback(() => abortRef.current?.abort(), []);
+
+  const reset = useCallback(() => {
     abortRef.current?.abort();
+    abortRef.current = null;
+    sessionRef.current = undefined;
+    assistantIdRef.current = null;
+    pendingTokensRef.current = '';
+    setHasReceivedToken(false);
+    setPendingInterrupt(null);
+    messagesRef.current = [];
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    setMessages([]);
+    setStreaming(false);
+    setError(null);
   }, []);
 
-  return { messages, streaming, error, pendingInterrupt, send, resume, stop };
+  const openSession = useCallback(
+    (threadId: string) => {
+      if (streaming) return;
+      const restored = loadMessages(threadId);
+      if (!restored.length) return;
+      sessionRef.current = threadId;
+      assistantIdRef.current = null;
+      messagesRef.current = restored;
+      setMessages(restored);
+      setError(null);
+    },
+    [streaming],
+  );
+
+  const deleteSession = useCallback(
+    (threadId: string) => {
+      setSessions(removeSession(threadId));
+      if (sessionRef.current === threadId) reset();
+    },
+    [reset],
+  );
+
+  return {
+    messages,
+    streaming,
+    hasReceivedToken,
+    error,
+    pendingInterrupt,
+    sessions,
+    send,
+    resume,
+    stop,
+    reset,
+    openSession,
+    deleteSession,
+  };
 }

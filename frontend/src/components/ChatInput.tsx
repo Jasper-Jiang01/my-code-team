@@ -1,16 +1,28 @@
-import { useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 
 interface Props {
   disabled: boolean;
   streaming: boolean;
   onSend: (text: string) => void;
   onStop: () => void;
+  /** 挂载后自动聚焦（欢迎屏 Hero 中的输入框使用） */
+  autoFocus?: boolean;
 }
 
-/** 输入框：悬浮卡片式（仿 DeepSeek），Enter 发送、Shift+Enter 换行，流式中可中断。 */
-export function ChatInput({ disabled, streaming, onSend, onStop }: Props) {
+/** 输入框：Enter 发送、Shift+Enter 换行，流式中可中断。 */
+export const ChatInput = memo(function ChatInput({
+  disabled,
+  streaming,
+  onSend,
+  onStop,
+  autoFocus = false,
+}: Props) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (autoFocus) textareaRef.current?.focus();
+  }, [autoFocus]);
 
   const handleSend = () => {
     if (!value.trim() || disabled) return;
@@ -19,11 +31,10 @@ export function ChatInput({ disabled, streaming, onSend, onStop }: Props) {
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
   };
 
-  const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setValue(e.target.value);
-    const el = e.target;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  const handleInput = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setValue(event.target.value);
+    event.target.style.height = 'auto';
+    event.target.style.height = `${Math.min(event.target.scrollHeight, 200)}px`;
   };
 
   return (
@@ -34,24 +45,31 @@ export function ChatInput({ disabled, streaming, onSend, onStop }: Props) {
         placeholder="给 CodePilot 发送消息"
         rows={1}
         onChange={handleInput}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
             handleSend();
           }
         }}
       />
       <div className="chat-input-toolbar">
+        <span className="input-hint">Enter 发送 · Shift + Enter 换行</span>
         {streaming ? (
-          <button className="btn-stop" onClick={onStop} aria-label="停止生成">
+          <button type="button" className="btn-stop" onClick={onStop} aria-label="停止生成">
             <span className="stop-icon" />
           </button>
         ) : (
-          <button className="btn-send" onClick={handleSend} disabled={disabled || !value.trim()} aria-label="发送">
+          <button
+            type="button"
+            className="btn-send"
+            onClick={handleSend}
+            disabled={disabled || !value.trim()}
+            aria-label="发送"
+          >
             ↑
           </button>
         )}
       </div>
     </div>
   );
-}
+});

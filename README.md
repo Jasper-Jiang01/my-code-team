@@ -48,13 +48,15 @@ CodePilot/
     │   │   ├── production.py                    # 生产子图（静态六步子流程）
     │   │   └── review.py                        # 评审子图（红蓝对抗+三道门禁）
     │   └── tools/                               # 工具定义
-    │       ├── search_km.py                     # KM 检索
-    │       ├── query_sql.py                     # SQL 取数
+    │       ├── search_km.py                     # KM / 学城检索
+    │       ├── search_web.py                    # 外部网页检索
+    │       ├── compare_evidence.py              # 内外检索对照
     │       ├── screenshot_diff.py               # 视觉比对
     │       ├── deploy_demo.py                   # Demo 部署
     │       └── vector_memory.py                 # 向量记忆
     ├── agents/                                  # Agent Harness
     │   ├── research.yaml
+    │   ├── knowledge.yaml                       # 问答：自主检索+对照
     │   ├── data.yaml
     │   ├── design.yaml
     │   ├── qa.yaml
@@ -227,7 +229,15 @@ make run
 # 等价于：langgraph dev
 ```
 
-`langgraph dev` 会读取 `langgraph.json` 中注册的 `main_workflow` 图，启动本地调试服务器（默认 `http://127.0.0.1:2024`），并自动打开 LangGraph Studio 可视化调试界面，无需手写 FastAPI 服务即可通过 `/threads`、`/runs/stream` 等原生 API 调用工作流。
+`langgraph dev` 会读取 `langgraph.json` 中注册的 `main_workflow` 图，启动本地调试服务器（默认 `http://127.0.0.1:2024`），并自动打开 LangGraph Studio。
+
+内网发布不要用 `langgraph dev`。前端默认对接 FastAPI：
+
+```bash
+cd backend
+make serve    # http://127.0.0.1:8000  → POST /api/chat
+make sync-catpaw   # 同步到 jingwai-agent-main，再推 master 走 CatPaw
+```
 
 ## 文档
 

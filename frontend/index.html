@@ -1,9 +1,15 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>CodePilot — AI 编码副驾驶</title>
+    <link rel="icon" type="image/png" href="%BASE_URL%logo.png" />
+    <meta name="color-scheme" content="dark" />
+    <style>
+      /* 暗色唯一主题：样式加载前先铺暗底，避免首屏白闪 */
+      html { background: #191a1c; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
